@@ -333,6 +333,17 @@ export function SessionCard({
                 restore session
               </button>
             )}
+            {!isTerminal && onRestart && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onRestart?.(session.id);
+                }}
+                className="rounded border border-[rgba(88,166,255,0.35)] px-2.5 py-1 text-[11px] text-[var(--color-accent)] transition-colors hover:bg-[rgba(88,166,255,0.1)]"
+              >
+                restart session
+              </button>
+            )}
             {!isTerminal && (
               <button
                 onClick={(e) => {
