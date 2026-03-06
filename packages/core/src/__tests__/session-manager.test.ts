@@ -1013,6 +1013,28 @@ describe("list", () => {
     expect(sessions[0].id).toBe("app-1");
   });
 
+  it("clears enrichment timeout when enrichment completes quickly", async () => {
+    vi.useFakeTimers();
+    const clearTimeoutSpy = vi.spyOn(globalThis, "clearTimeout");
+
+    writeMetadata(sessionsDir, "app-1", {
+      worktree: "/tmp",
+      branch: "a",
+      status: "working",
+      project: "my-app",
+      runtimeHandle: JSON.stringify(makeHandle("rt-1")),
+    });
+
+    const sm = createSessionManager({ config, registry: mockRegistry });
+    const sessions = await sm.list();
+
+    expect(sessions).toHaveLength(1);
+    expect(clearTimeoutSpy).toHaveBeenCalled();
+
+    clearTimeoutSpy.mockRestore();
+    vi.useRealTimers();
+  });
+
   it("marks dead runtimes as killed", async () => {
     const deadRuntime: Runtime = {
       ...mockRuntime,
