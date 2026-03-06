@@ -1771,12 +1771,28 @@ export function createSessionManager(deps: SessionManagerDeps): SessionManager {
 
     const workspacePath = raw["worktree"] || project.path;
     let launchCommand: string;
+    const configuredSubagent =
+      typeof project.agentConfig?.["subagent"] === "string"
+        ? project.agentConfig["subagent"]
+        : undefined;
     const agentLaunchConfig = {
       sessionId,
-      projectConfig: project,
+      projectConfig: {
+        ...project,
+        agentConfig: {
+          ...(project.agentConfig ?? {}),
+          ...(session.metadata?.opencodeSessionId
+            ? { opencodeSessionId: session.metadata.opencodeSessionId }
+            : {}),
+        },
+      },
       issueId: session.issueId ?? undefined,
       permissions: project.agentConfig?.permissions,
-      model: project.agentConfig?.model,
+      model:
+        raw["role"] === "orchestrator"
+          ? (project.agentConfig?.orchestratorModel ?? project.agentConfig?.model)
+          : project.agentConfig?.model,
+      subagent: configuredSubagent,
     };
 
     if (plugins.agent.getRestoreCommand) {
@@ -1812,13 +1828,26 @@ export function createSessionManager(deps: SessionManagerDeps): SessionManager {
       ...session,
       status: "spawning",
       activity: "active",
+      workspacePath,
       runtimeHandle: handle,
       restoredAt: new Date(now),
     };
 
     if (plugins.agent.postLaunchSetup) {
       try {
+        const metadataBeforePostLaunch = { ...(restartedSession.metadata ?? {}) };
         await plugins.agent.postLaunchSetup(restartedSession);
+
+        const metadataAfterPostLaunch = restartedSession.metadata ?? {};
+        const metadataUpdates = Object.fromEntries(
+          Object.entries(metadataAfterPostLaunch).filter(
+            ([key, value]) => metadataBeforePostLaunch[key] !== value,
+          ),
+        );
+
+        if (Object.keys(metadataUpdates).length > 0) {
+          updateMetadata(sessionsDir, sessionId, metadataUpdates);
+        }
       } catch {
         // Non-fatal — session is already running
       }
