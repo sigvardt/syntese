@@ -1019,6 +1019,35 @@ export function createSessionManager(deps: SessionManagerDeps): OpenCodeSessionM
       }
       if (existingAlive && orchestratorSessionStrategy !== "reuse") {
         await plugins.runtime.destroy(existingOrchestrator.runtimeHandle).catch(() => undefined);
+        // Destroy runtime and delete metadata without archive for ignore strategy
+        deleteMetadata(sessionsDir, sessionId, false);
+      }
+      // For dead runtime with reuse strategy and opencode agent, archive to preserve opencodeSessionId for reuse lookup
+      if (!existingAlive && orchestratorSessionStrategy === "reuse" && plugins.agent.name === "opencode") {
+        deleteMetadata(sessionsDir, sessionId, true);
+      }
+    }
+      if (existingAlive && orchestratorSessionStrategy !== "reuse") {
+        await plugins.runtime.destroy(existingOrchestrator.runtimeHandle).catch(() => undefined);
+        // Destroy runtime and delete metadata without archive for ignore strategy
+        deleteMetadata(sessionsDir, sessionId, false);
+      }
+      // For dead runtime with reuse strategy and opencode agent, archive to preserve opencodeSessionId for reuse lookup
+      if (!existingAlive && orchestratorSessionStrategy === "reuse" && plugins.agent.name === "opencode") {
+        deleteMetadata(sessionsDir, sessionId, true);
+      }
+    }
+      if (existingAlive && orchestratorSessionStrategy !== "reuse") {
+        await plugins.runtime.destroy(existingOrchestrator.runtimeHandle).catch(() => undefined);
+        deleteMetadata(sessionsDir, sessionId, false);
+      }
+      // For dead runtime with reuse strategy and opencode agent, archive to allow opencodeSessionId reuse.
+      if (
+        !existingAlive &&
+        orchestratorSessionStrategy === "reuse" &&
+        plugins.agent.name === "opencode"
+      ) {
+        deleteMetadata(sessionsDir, sessionId, true);
       }
     }
 

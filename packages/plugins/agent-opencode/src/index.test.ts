@@ -113,12 +113,13 @@ function installMockOpencodeWithNotFoundDelete(sessionListJson: string): string 
     [
       "#!/usr/bin/env bash",
       "set -euo pipefail",
-      'if [[ "$1" == "session" && "$2" == "list" ]]; then,
-      `  printf '%s\\n' '${sessionListJson}'`,
+      'if [[ "$1" == "session" && "$2" == "list" ]]; then',
+      `  printf '%s\\n' '${sessionListJson.replace(/'/g, "'\\''")}'`,
       "  exit 0",
       "fi",
-      'if [[ "$1" == "session" && "$2" == "delete" ]]; then
-      `  printf 'Error: Session not found: %s >&2\n' "  exit 1",
+      'if [[ "$1" == "session" && "$2" == "delete" ]]; then',
+      '  printf "Error: Session not found: %s\\n" "$*" >&2',
+      "  exit 1",
       "fi",
       "exit 1",
       "",
