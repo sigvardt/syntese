@@ -180,10 +180,10 @@ function createOpenCodeAgent(): Agent {
 
       if (!existingSessionId) {
         const runOptions = [
-          "--title",
-          shellEscape(`AO:${config.sessionId}`),
           "--format",
           "json",
+          "--title",
+          shellEscape(`AO:${config.sessionId}`),
           ...sharedOptions,
         ];
         const captureScript = buildSessionIdCaptureScript();
