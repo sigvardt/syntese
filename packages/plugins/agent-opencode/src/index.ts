@@ -112,7 +112,7 @@ process.stdin.on('data', c => input += c).on('end', () => {
   return script.replace(/\n/g, " ").replace(/\s+/g, " ");
 }
 
-function buildContinueSessionCommand(sessionTitle: string, sharedOptions: string[]): string {
+function _buildContinueSessionCommand(sessionTitle: string, sharedOptions: string[]): string {
   const script = buildSessionLookupScript();
   const options = sharedOptions.length > 0 ? ` ${sharedOptions.join(" ")}` : "";
   return [
