@@ -277,9 +277,9 @@ describe("getLaunchCommand (integration)", () => {
       systemPromptFile: "/tmp/orchestrator-prompt.md",
     });
     expect(cmd).toContain(
-      "opencode run --title 'AO:test-orchestrator' \"$(cat '/tmp/orchestrator-prompt.md')\"",
+      "opencode run --format json --title 'AO:test-orchestrator' \"$(cat '/tmp/orchestrator-prompt.md')\"",
     );
-    expect(cmd).toContain("&& exec opencode --session");
+    expect(cmd).toContain('exec opencode --session "$SES_ID"');
   });
 
   it("escapes single quotes in systemPrompt", () => {
@@ -324,7 +324,7 @@ describe("getLaunchCommand (integration)", () => {
       ...baseConfig,
       prompt: "line1\nline2",
     });
-    expect(cmd).toContain("opencode run --title 'AO:test-1'");
+    expect(cmd).toContain("opencode run --format json --title 'AO:test-1'");
     expect(cmd).toContain("'line1");
     expect(cmd).not.toContain("--prompt");
   });
@@ -336,8 +336,8 @@ describe("getLaunchCommand (integration)", () => {
     });
     expect(cmd).toContain("--title 'AO:test-1'");
     expect(cmd).not.toContain("--prompt 'start work'");
-    expect(cmd).toContain("opencode run --title 'AO:test-1' 'start work'");
-    expect(cmd).toContain("&& exec opencode --session");
+    expect(cmd).toContain("opencode run --format json --title 'AO:test-1' 'start work'");
+    expect(cmd).toContain('exec opencode --session "$SES_ID"');
   });
 
   it("uses --session when existing OpenCode session id is provided", () => {
