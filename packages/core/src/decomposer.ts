@@ -149,9 +149,21 @@ async function decomposeTask(
     throw new Error(`Decomposition failed — no JSON array in response: ${text}`);
   }
 
-  const subtasks = JSON.parse(jsonMatch[0]) as string[];
-  if (!Array.isArray(subtasks) || subtasks.length < 2) {
-    throw new Error(`Decomposition produced ${subtasks.length} subtasks — need at least 2`);
+  const parsed = JSON.parse(jsonMatch[0]);
+  if (!Array.isArray(parsed) || parsed.length < 2) {
+    throw new Error(
+      `Decomposition produced ${Array.isArray(parsed) ? parsed.length : "non-array"} subtasks — need at least 2`,
+    );
+  }
+  // Validate all elements are strings (LLM output may contain non-strings)
+  const subtasks: string[] = [];
+  for (let i = 0; i < parsed.length; i++) {
+    if (typeof parsed[i] !== "string") {
+      throw new Error(
+        `Decomposition produced non-string subtask at index ${i}: ${JSON.stringify(parsed[i])}`,
+      );
+    }
+    subtasks.push(parsed[i]);
   }
 
   return subtasks;
@@ -177,7 +189,10 @@ async function planTree(
   task: TaskNode,
   maxDepth: number,
 ): Promise<TaskNode> {
-  const kind = task.depth >= maxDepth ? "atomic" : await classifyTask(client, model, task.description, task.lineage);
+  const kind =
+    task.depth >= maxDepth
+      ? "atomic"
+      : await classifyTask(client, model, task.description, task.lineage);
 
   task.kind = kind;
 
@@ -250,7 +265,8 @@ export function getSiblings(root: TaskNode, taskId: string): string[] {
 /** Format the plan tree as a human-readable string. */
 export function formatPlanTree(task: TaskNode, indent = 0): string {
   const prefix = "  ".repeat(indent);
-  const kindTag = task.kind === "atomic" ? "[ATOMIC]" : task.kind === "composite" ? "[COMPOSITE]" : "";
+  const kindTag =
+    task.kind === "atomic" ? "[ATOMIC]" : task.kind === "composite" ? "[COMPOSITE]" : "";
   const statusTag = task.status !== "ready" ? ` (${task.status})` : "";
   let line = `${prefix}${task.id}. ${kindTag} ${task.description}${statusTag}`;
 

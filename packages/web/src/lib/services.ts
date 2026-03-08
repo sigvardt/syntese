@@ -120,7 +120,11 @@ export function startBacklogPoller(): void {
 }
 
 // Track which issues we've already processed to avoid repeated API calls
-const processedIssues = new Set<string>();
+// Use globalThis to persist across HMR reloads in development
+const globalForProcessed = globalThis as typeof globalThis & {
+  _aoProcessedIssues?: Set<string>;
+};
+const processedIssues = (globalForProcessed._aoProcessedIssues ??= new Set<string>());
 
 /** Label GitHub issues for verification when their PRs have been merged. */
 async function labelIssuesForVerification(
@@ -295,6 +299,7 @@ async function pollBacklog(): Promise<void> {
               console.log(
                 `[backlog] Auto-executing decomposition for ${issue.id} (${leaves.length} subtasks)`,
               );
+              let spawnedCount = 0;
               for (const leaf of leaves) {
                 if (availableSlots <= 0) break;
                 const siblings = getSiblings(plan.tree, leaf.id);
@@ -305,6 +310,14 @@ async function pollBacklog(): Promise<void> {
                   siblings,
                 });
                 availableSlots--;
+                spawnedCount++;
+              }
+              // If not all leaves were spawned, keep issue in backlog for next cycle
+              if (spawnedCount < leaves.length) {
+                console.log(
+                  `[backlog] Spawned ${spawnedCount}/${leaves.length} subtasks for ${issue.id}, remaining will be picked up on next poll`,
+                );
+                continue; // Don't claim the issue - let remaining leaves spawn later
               }
             }
           } else {
