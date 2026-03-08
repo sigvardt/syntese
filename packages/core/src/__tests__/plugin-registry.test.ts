@@ -191,6 +191,31 @@ describe("loadBuiltins", () => {
       retryDelayMs: 500,
     });
   });
+
+  it("matches notifier config by plugin name instead of instance key", async () => {
+    const registry = createPluginRegistry();
+    const fakeWebhookNotifier = makePlugin("notifier", "webhook");
+    const config = makeOrchestratorConfig({
+      notifiers: {
+        "my-webhook": {
+          plugin: "webhook",
+          url: "http://127.0.0.1:8787/custom-hook",
+          retries: 4,
+        },
+      },
+    });
+
+    await registry.loadBuiltins(config, async (pkg: string) => {
+      if (pkg === "@composio/ao-plugin-notifier-webhook") return fakeWebhookNotifier;
+      throw new Error(`Not found: ${pkg}`);
+    });
+
+    expect(fakeWebhookNotifier.create).toHaveBeenCalledWith({
+      plugin: "webhook",
+      url: "http://127.0.0.1:8787/custom-hook",
+      retries: 4,
+    });
+  });
 });
 
 describe("extractPluginConfig (via register with config)", () => {

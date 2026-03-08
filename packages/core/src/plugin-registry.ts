@@ -57,9 +57,14 @@ function extractPluginConfig(
   config: OrchestratorConfig,
 ): Record<string, unknown> | undefined {
   if (slot === "notifier") {
-    const notifierConfig = config.notifiers[name];
-    if (notifierConfig && typeof notifierConfig === "object") {
-      return notifierConfig;
+    for (const notifierConfig of Object.values(config.notifiers)) {
+      if (
+        notifierConfig &&
+        typeof notifierConfig === "object" &&
+        notifierConfig["plugin"] === name
+      ) {
+        return notifierConfig;
+      }
     }
   }
 
