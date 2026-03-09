@@ -1,0 +1,130 @@
+name: Fork Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Fork version tag to create (for example v0.1.0-sigvardt.1)
+        required: true
+        type: string
+
+concurrency:
+  group: fork-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: github.repository == 'sigvardt/agent-orchestrator'
+    name: Release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ inputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Ensure release runs from main
+        run: |
+          if [ "$GITHUB_REF_NAME" != "main" ]; then
+            echo "Fork releases must be dispatched from main." >&2
+            exit 1
+          fi
+
+      - name: Validate version format
+        run: |
+          if ! [[ "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-sigvardt\.[0-9]+$ ]]; then
+            echo "Expected version like v0.1.0-sigvardt.1." >&2
+            exit 1
+          fi
+
+      - name: Ensure tag does not already exist
+        run: |
+          if git rev-parse --verify --quiet "refs/tags/$VERSION" >/dev/null; then
+            echo "Tag $VERSION already exists." >&2
+            exit 1
+          fi
+
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install tmux
+        run: sudo apt-get update && sudo apt-get install -y tmux
+
+      - name: Start tmux server
+        run: tmux start-server
+
+      - name: Install Claude Code
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Install Codex
+        run: npm install -g @openai/codex
+
+      - name: Install Aider
+        run: pip install aider-chat
+
+      - name: Install OpenCode
+        run: npm install -g opencode-ai
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build non-web packages
+        run: pnpm -r --filter '!@composio/ao-web' build
+
+      - name: Build web
+        run: pnpm --filter @composio/ao-web build
+
+      - name: Typecheck
+        run: pnpm run typecheck
+
+      - name: Lint
+        run: pnpm run lint
+
+      - name: Run package unit tests
+        run: pnpm test
+
+      - name: Run web server tests
+        working-directory: packages/web
+        run: pnpm exec vitest run server/__tests__/
+
+      - name: Run integration tests
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+          LINEAR_TEAM_ID: ${{ secrets.LINEAR_TEAM_ID }}
+        run: pnpm test:integration
+
+      - name: Update fork version and changelog
+        run: node scripts/prepare-fork-release.js "$VERSION"
+
+      - name: Configure git author
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Commit fork release metadata
+        run: |
+          if git diff --quiet -- FORK_VERSION FORK_CHANGELOG.md; then
+            echo "FORK_VERSION and FORK_CHANGELOG.md are already up to date."
+            exit 0
+          fi
+
+          git add FORK_VERSION FORK_CHANGELOG.md
+          git commit -m "chore(release): $VERSION [skip ci]"
+          git push origin HEAD:main
+
+      - name: Create fork tag
+        run: |
+          git tag "$VERSION"
+          git push origin "$VERSION"
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$VERSION" --generate-notes --latest --verify-tag
