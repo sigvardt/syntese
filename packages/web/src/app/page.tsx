@@ -12,7 +12,7 @@ import {
   computeStats,
 } from "@/lib/serialize";
 import { prCache, prCacheKey } from "@/lib/cache";
-import { getPrimaryProjectId, getProjectName } from "@/lib/project-name";
+import { getPrimaryProjectId, getProjectName, getAllProjects } from "@/lib/project-name";
 import { matchesProject } from "@/lib/project-utils";
 
 export async function generateMetadata(): Promise<Metadata> {
@@ -111,6 +111,7 @@ export default async function Home(props: { searchParams: Promise<{ project?: st
   }
 
   const projectName = getProjectName();
+  const projects = getAllProjects();
 
   return (
     <Dashboard
@@ -119,6 +120,7 @@ export default async function Home(props: { searchParams: Promise<{ project?: st
       orchestratorId={orchestratorId}
       projectId={projectFilter === "all" ? undefined : projectFilter}
       projectName={projectName}
+      projects={projects}
     />
   );
 }

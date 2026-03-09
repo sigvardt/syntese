@@ -14,6 +14,12 @@ import { AttentionZone } from "./AttentionZone";
 import { PRTableRow } from "./PRStatus";
 import { DynamicFavicon } from "./DynamicFavicon";
 import { useSessionEvents } from "@/hooks/useSessionEvents";
+import { ProjectSidebar } from "./ProjectSidebar";
+
+interface ProjectInfo {
+  id: string;
+  name: string;
+}
 
 interface DashboardProps {
   initialSessions: DashboardSession[];
@@ -21,6 +27,7 @@ interface DashboardProps {
   orchestratorId?: string | null;
   projectId?: string;
   projectName?: string;
+  projects?: ProjectInfo[];
 }
 
 const KANBAN_LEVELS = ["working", "pending", "review", "respond", "merge"] as const;
@@ -31,9 +38,11 @@ export function Dashboard({
   orchestratorId,
   projectId,
   projectName,
+  projects = [],
 }: DashboardProps) {
   const sessions = useSessionEvents(initialSessions, projectId);
   const [rateLimitDismissed, setRateLimitDismissed] = useState(false);
+  const showSidebar = projects.length > 1;
   const grouped = useMemo(() => {
     const zones: Record<AttentionLevel, DashboardSession[]> = {
       merge: [],
@@ -102,146 +111,149 @@ export function Dashboard({
   );
 
   return (
-    <div className="px-8 py-7">
-      <DynamicFavicon sessions={sessions} projectName={projectName} />
-      {/* Header */}
-      <div className="mb-8 flex items-center justify-between border-b border-[var(--color-border-subtle)] pb-6">
-        <div className="flex items-center gap-6">
-          <h1 className="text-[17px] font-semibold tracking-[-0.02em] text-[var(--color-text-primary)]">
-            Orchestrator
-          </h1>
-          <StatusLine stats={stats} />
-        </div>
-        {orchestratorId && (
-          <a
-            href={`/sessions/${encodeURIComponent(orchestratorId)}`}
-            className="orchestrator-btn flex items-center gap-2 rounded-[7px] px-4 py-2 text-[12px] font-semibold hover:no-underline"
-          >
-            <span className="h-1.5 w-1.5 rounded-full bg-[var(--color-accent)] opacity-80" />
-            orchestrator
-            <svg
-              className="h-3 w-3 opacity-70"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              viewBox="0 0 24 24"
+    <div className="flex h-screen">
+      {showSidebar && <ProjectSidebar projects={projects} activeProjectId={projectId} />}
+      <div className="flex-1 overflow-y-auto px-8 py-7">
+        <DynamicFavicon sessions={sessions} projectName={projectName} />
+        {/* Header */}
+        <div className="mb-8 flex items-center justify-between border-b border-[var(--color-border-subtle)] pb-6">
+          <div className="flex items-center gap-6">
+            <h1 className="text-[17px] font-semibold tracking-[-0.02em] text-[var(--color-text-primary)]">
+              Orchestrator
+            </h1>
+            <StatusLine stats={stats} />
+          </div>
+          {orchestratorId && (
+            <a
+              href={`/sessions/${encodeURIComponent(orchestratorId)}`}
+              className="orchestrator-btn flex items-center gap-2 rounded-[7px] px-4 py-2 text-[12px] font-semibold hover:no-underline"
             >
-              <path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6M15 3h6v6M10 14L21 3" />
-            </svg>
-          </a>
-        )}
-      </div>
-
-      {/* Rate limit notice */}
-      {anyRateLimited && !rateLimitDismissed && (
-        <div className="mb-6 flex items-center gap-2.5 rounded border border-[rgba(245,158,11,0.25)] bg-[rgba(245,158,11,0.05)] px-3.5 py-2.5 text-[11px] text-[var(--color-status-attention)]">
-          <svg
-            className="h-3.5 w-3.5 shrink-0"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            viewBox="0 0 24 24"
-          >
-            <circle cx="12" cy="12" r="10" />
-            <path d="M12 8v4M12 16h.01" />
-          </svg>
-          <span className="flex-1">
-            GitHub API rate limited — PR data (CI status, review state, sizes) may be stale. Will
-            retry automatically on next refresh.
-          </span>
-          <button
-            onClick={() => setRateLimitDismissed(true)}
-            className="ml-1 shrink-0 opacity-60 hover:opacity-100"
-            aria-label="Dismiss"
-          >
-            <svg
-              className="h-3.5 w-3.5"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              viewBox="0 0 24 24"
-            >
-              <path d="M18 6 6 18M6 6l12 12" />
-            </svg>
-          </button>
-        </div>
-      )}
-
-      {/* Kanban columns for active zones */}
-      {hasKanbanSessions && (
-        <div className="mb-8 flex gap-4 overflow-x-auto pb-2">
-          {KANBAN_LEVELS.map((level) =>
-            grouped[level].length > 0 ? (
-              <div key={level} className="min-w-[200px] flex-1">
-                <AttentionZone
-                  level={level}
-                  sessions={grouped[level]}
-                  variant="column"
-                  onSend={handleSend}
-                  onKill={handleKill}
-                  onMerge={handleMerge}
-                  onRestore={handleRestore}
-                />
-              </div>
-            ) : null,
+              <span className="h-1.5 w-1.5 rounded-full bg-[var(--color-accent)] opacity-80" />
+              orchestrator
+              <svg
+                className="h-3 w-3 opacity-70"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                viewBox="0 0 24 24"
+              >
+                <path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6M15 3h6v6M10 14L21 3" />
+              </svg>
+            </a>
           )}
         </div>
-      )}
 
-      {/* Done — full-width grid below Kanban */}
-      {grouped.done.length > 0 && (
-        <div className="mb-8">
-          <AttentionZone
-            level="done"
-            sessions={grouped.done}
-            variant="grid"
-            onSend={handleSend}
-            onKill={handleKill}
-            onMerge={handleMerge}
-            onRestore={handleRestore}
-          />
-        </div>
-      )}
-
-      {/* PR Table */}
-      {openPRs.length > 0 && (
-        <div className="mx-auto max-w-[900px]">
-          <h2 className="mb-3 px-1 text-[10px] font-bold uppercase tracking-[0.10em] text-[var(--color-text-tertiary)]">
-            Pull Requests
-          </h2>
-          <div className="overflow-hidden rounded-[6px] border border-[var(--color-border-default)]">
-            <table className="w-full border-collapse">
-              <thead>
-                <tr className="border-b border-[var(--color-border-muted)]">
-                  <th className="px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
-                    PR
-                  </th>
-                  <th className="px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
-                    Title
-                  </th>
-                  <th className="px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
-                    Size
-                  </th>
-                  <th className="px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
-                    CI
-                  </th>
-                  <th className="px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
-                    Review
-                  </th>
-                  <th className="px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
-                    Unresolved
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {openPRs.map((pr) => (
-                  <PRTableRow key={pr.number} pr={pr} />
-                ))}
-              </tbody>
-            </table>
+        {/* Rate limit notice */}
+        {anyRateLimited && !rateLimitDismissed && (
+          <div className="mb-6 flex items-center gap-2.5 rounded border border-[rgba(245,158,11,0.25)] bg-[rgba(245,158,11,0.05)] px-3.5 py-2.5 text-[11px] text-[var(--color-status-attention)]">
+            <svg
+              className="h-3.5 w-3.5 shrink-0"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              viewBox="0 0 24 24"
+            >
+              <circle cx="12" cy="12" r="10" />
+              <path d="M12 8v4M12 16h.01" />
+            </svg>
+            <span className="flex-1">
+              GitHub API rate limited — PR data (CI status, review state, sizes) may be stale. Will
+              retry automatically on next refresh.
+            </span>
+            <button
+              onClick={() => setRateLimitDismissed(true)}
+              className="ml-1 shrink-0 opacity-60 hover:opacity-100"
+              aria-label="Dismiss"
+            >
+              <svg
+                className="h-3.5 w-3.5"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                viewBox="0 0 24 24"
+              >
+                <path d="M18 6 6 18M6 6l12 12" />
+              </svg>
+            </button>
           </div>
-        </div>
-      )}
+        )}
+
+        {/* Kanban columns for active zones */}
+        {hasKanbanSessions && (
+          <div className="mb-8 flex gap-4 overflow-x-auto pb-2">
+            {KANBAN_LEVELS.map((level) =>
+              grouped[level].length > 0 ? (
+                <div key={level} className="min-w-[200px] flex-1">
+                  <AttentionZone
+                    level={level}
+                    sessions={grouped[level]}
+                    variant="column"
+                    onSend={handleSend}
+                    onKill={handleKill}
+                    onMerge={handleMerge}
+                    onRestore={handleRestore}
+                  />
+                </div>
+              ) : null,
+            )}
+          </div>
+        )}
+
+        {/* Done — full-width grid below Kanban */}
+        {grouped.done.length > 0 && (
+          <div className="mb-8">
+            <AttentionZone
+              level="done"
+              sessions={grouped.done}
+              variant="grid"
+              onSend={handleSend}
+              onKill={handleKill}
+              onMerge={handleMerge}
+              onRestore={handleRestore}
+            />
+          </div>
+        )}
+
+        {/* PR Table */}
+        {openPRs.length > 0 && (
+          <div className="mx-auto max-w-[900px]">
+            <h2 className="mb-3 px-1 text-[10px] font-bold uppercase tracking-[0.10em] text-[var(--color-text-tertiary)]">
+              Pull Requests
+            </h2>
+            <div className="overflow-hidden rounded-[6px] border border-[var(--color-border-default)]">
+              <table className="w-full border-collapse">
+                <thead>
+                  <tr className="border-b border-[var(--color-border-muted)]">
+                    <th className="px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
+                      PR
+                    </th>
+                    <th className="px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
+                      Title
+                    </th>
+                    <th className="px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
+                      Size
+                    </th>
+                    <th className="px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
+                      CI
+                    </th>
+                    <th className="px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
+                      Review
+                    </th>
+                    <th className="px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
+                      Unresolved
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {openPRs.map((pr) => (
+                    <PRTableRow key={pr.number} pr={pr} />
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

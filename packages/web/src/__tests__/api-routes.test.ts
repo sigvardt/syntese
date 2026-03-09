@@ -159,9 +159,17 @@ vi.mock("@/lib/services", () => ({
   getSCM: vi.fn(() => mockSCM),
 }));
 
+vi.mock("@/lib/project-name", () => ({
+  getProjectName: () => "My App",
+  getPrimaryProjectId: () => "my-app",
+  getAllProjects: () => [{ id: "my-app", name: "My App" }],
+}));
+
 // ── Import routes after mocking ───────────────────────────────────────
 
 import { GET as sessionsGET } from "@/app/api/sessions/route";
+import { GET as projectsGET } from "@/app/api/projects/route";
+import { POST as spawnPOST } from "@/app/api/spawn/route";
 import { POST as spawnPOST } from "@/app/api/spawn/route";
 import { POST as sendPOST } from "@/app/api/sessions/[id]/send/route";
 import { POST as messagePOST } from "@/app/api/sessions/[id]/message/route";
@@ -814,6 +822,28 @@ describe("API Routes", () => {
       const data = await res.json();
       expect(data.stats.totalSessions).toBe(2);
       expect(data.stats.workingSessions).toBe(2);
+    });
+  });
+
+  // ── GET /api/projects ────────────────────────────────────────────────
+
+  describe("GET /api/projects", () => {
+    it("returns list of configured projects", async () => {
+      const res = await projectsGET(makeRequest("http://localhost:3000/api/projects"));
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(data.projects).toBeDefined();
+      expect(Array.isArray(data.projects)).toBe(true);
+      expect(data.projects.length).toBe(1);
+      expect(data.projects[0]).toHaveProperty("id");
+      expect(data.projects[0]).toHaveProperty("name");
+    });
+
+    it("project includes id and name", async () => {
+      const res = await projectsGET(makeRequest("http://localhost:3000/api/projects"));
+      const data = await res.json();
+      expect(data.projects[0].id).toBe("my-app");
+      expect(data.projects[0].name).toBe("My App");
     });
   });
 });
