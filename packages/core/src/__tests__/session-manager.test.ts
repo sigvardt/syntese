@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { chmodSync, mkdirSync, readFileSync, rmSync, writeFileSync, existsSync } from "node:fs";
+import { execFileSync, spawn } from "node:child_process";
 import { join } from "node:path";
 import { homedir, tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
@@ -32,6 +33,23 @@ let originalPath: string | undefined;
 
 function makeHandle(id: string): RuntimeHandle {
   return { id, runtimeName: "mock", data: {} };
+}
+
+function runGit(cwd: string, ...args: string[]): string {
+  return execFileSync("git", args, { cwd, encoding: "utf-8" }).trim();
+}
+
+function formatErrorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function installMockOpencode(
@@ -1520,7 +1538,7 @@ describe("kill", () => {
     await expect(sm.kill("nonexistent")).rejects.toThrow("not found");
   });
 
-  it("tolerates runtime destroy failure", async () => {
+  it("continues cleanup when runtime destroy fails", async () => {
     const failRuntime: Runtime = {
       ...mockRuntime,
       destroy: vi.fn().mockRejectedValue(new Error("already gone")),
@@ -1543,8 +1561,84 @@ describe("kill", () => {
     });
 
     const sm = createSessionManager({ config, registry: registryWithFail });
-    // Should not throw even though runtime.destroy fails
-    await expect(sm.kill("app-1")).resolves.toBeUndefined();
+    await expect(sm.kill("app-1")).rejects.toThrow("runtime: Failed to stop mock runtime rt-1");
+    expect(readMetadata(sessionsDir, "app-1")).toBeNull();
+  });
+
+  it("force-cleans process, worktree, branch, and metadata even after runtime failure", async () => {
+    const repoPath = config.projects["my-app"]?.path;
+    if (!repoPath) throw new Error("missing repo path");
+
+    mkdirSync(repoPath, { recursive: true });
+    runGit(repoPath, "init", "-b", "main");
+    runGit(repoPath, "config", "user.email", "ao@example.com");
+    runGit(repoPath, "config", "user.name", "AO Test");
+    writeFileSync(join(repoPath, "README.md"), "hello\n", "utf-8");
+    runGit(repoPath, "add", "README.md");
+    runGit(repoPath, "commit", "-m", "init");
+
+    const managedWorktree = join(getWorktreesDir(config.configPath, repoPath), "app-1");
+    mkdirSync(join(getWorktreesDir(config.configPath, repoPath)), { recursive: true });
+    runGit(repoPath, "worktree", "add", "-b", "feat/issue-1", managedWorktree, "HEAD");
+
+    const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {
+      detached: true,
+      stdio: "ignore",
+    });
+    child.unref();
+
+    mockRuntime.destroy = vi.fn().mockRejectedValue(new Error("runtime boom"));
+    mockWorkspace = {
+      ...mockWorkspace,
+      name: "worktree",
+      destroy: vi.fn().mockRejectedValue(new Error("workspace plugin boom")),
+    };
+
+    writeMetadata(sessionsDir, "app-1", {
+      worktree: managedWorktree,
+      branch: "feat/issue-1",
+      status: "working",
+      project: "my-app",
+      runtimeHandle: JSON.stringify({
+        id: "proc-1",
+        runtimeName: "process",
+        data: { pid: child.pid },
+      }),
+    });
+
+    const steps: string[] = [];
+    const sm = createSessionManager({ config, registry: mockRegistry });
+
+    try {
+      await sm.kill("app-1", {
+        onStep: (result) => steps.push(`${result.step}:${result.status}:${result.message}`),
+      });
+      throw new Error("expected kill to fail");
+    } catch (err: unknown) {
+      expect(formatErrorMessage(err)).toContain("runtime: Failed to stop process runtime proc-1");
+    }
+
+    expect(mockRuntime.destroy).toHaveBeenCalled();
+    expect(mockWorkspace.destroy).toHaveBeenCalledWith(managedWorktree);
+    expect(steps).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("runtime:failed:Failed to stop process runtime proc-1"),
+        expect.stringContaining("agent:success:Stopped session process tree"),
+        expect.stringContaining(`worktree:success:Removed worktree ${managedWorktree}`),
+        expect.stringContaining("branch:success:Deleted local branch feat/issue-1"),
+        expect.stringContaining("metadata:success:Archived metadata for app-1"),
+      ]),
+    );
+
+    expect(existsSync(managedWorktree)).toBe(false);
+    expect(runGit(repoPath, "branch", "--list", "feat/issue-1")).toBe("");
+    expect(runGit(repoPath, "worktree", "list", "--porcelain")).not.toContain(managedWorktree);
+    expect(readMetadata(sessionsDir, "app-1")).toBeNull();
+
+    const pid = child.pid;
+    if (pid !== undefined) {
+      expect(isProcessAlive(pid)).toBe(false);
+    }
   });
 
   it("does not purge mapped OpenCode session on default kill", async () => {

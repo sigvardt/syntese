@@ -1066,7 +1066,7 @@ export interface SessionManager {
   restore(sessionId: SessionId): Promise<Session>;
   list(projectId?: string): Promise<Session[]>;
   get(sessionId: SessionId): Promise<Session | null>;
-  kill(sessionId: SessionId, options?: { purgeOpenCode?: boolean }): Promise<void>;
+  kill(sessionId: SessionId, options?: SessionKillOptions): Promise<void>;
   cleanup(
     projectId?: string,
     options?: { dryRun?: boolean; purgeOpenCode?: boolean },
@@ -1079,6 +1079,21 @@ export interface SessionManager {
 export interface OpenCodeSessionManager extends SessionManager {
   /** Remap session to OpenCode session ID, returns the mapped OpenCode session ID */
   remap(sessionId: SessionId, force?: boolean): Promise<string>;
+}
+
+export type SessionKillStep = "runtime" | "agent" | "worktree" | "branch" | "metadata" | "opencode";
+
+export type SessionKillStepStatus = "success" | "failed" | "skipped";
+
+export interface SessionKillStepResult {
+  step: SessionKillStep;
+  status: SessionKillStepStatus;
+  message: string;
+}
+
+export interface SessionKillOptions {
+  purgeOpenCode?: boolean;
+  onStep?: (result: SessionKillStepResult) => void;
 }
 
 export interface ClaimPROptions {

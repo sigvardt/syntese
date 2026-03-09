@@ -348,13 +348,26 @@ describe("session kill", () => {
       "worktree=/tmp/wt\nbranch=feat/fix\nstatus=working\n",
     );
 
-    mockSessionManager.kill.mockResolvedValue(undefined);
+    mockSessionManager.kill.mockImplementation(
+      async (_session: string, opts?: Record<string, unknown>) => {
+        const onStep = opts?.["onStep"];
+        if (typeof onStep === "function") {
+          onStep({ step: "runtime", status: "success", message: "Killed tmux session app-1" });
+          onStep({ step: "metadata", status: "success", message: "Archived metadata for app-1" });
+        }
+      },
+    );
 
     await program.parseAsync(["node", "test", "session", "kill", "app-1"]);
 
     const output = consoleSpy.mock.calls.map((c) => String(c[0])).join("\n");
+    expect(output).toContain("Killed tmux session app-1");
+    expect(output).toContain("Archived metadata for app-1");
     expect(output).toContain("Session app-1 killed.");
-    expect(mockSessionManager.kill).toHaveBeenCalledWith("app-1", { purgeOpenCode: false });
+    expect(mockSessionManager.kill).toHaveBeenCalledWith(
+      "app-1",
+      expect.objectContaining({ purgeOpenCode: false, onStep: expect.any(Function) }),
+    );
   });
 
   it("calls session manager kill with the session name", async () => {
@@ -364,7 +377,10 @@ describe("session kill", () => {
 
     await program.parseAsync(["node", "test", "session", "kill", "app-1"]);
 
-    expect(mockSessionManager.kill).toHaveBeenCalledWith("app-1", { purgeOpenCode: false });
+    expect(mockSessionManager.kill).toHaveBeenCalledWith(
+      "app-1",
+      expect.objectContaining({ purgeOpenCode: false, onStep: expect.any(Function) }),
+    );
   });
 
   it("passes purge flag for OpenCode cleanup", async () => {
@@ -372,7 +388,10 @@ describe("session kill", () => {
 
     await program.parseAsync(["node", "test", "session", "kill", "app-1", "--purge-session"]);
 
-    expect(mockSessionManager.kill).toHaveBeenCalledWith("app-1", { purgeOpenCode: true });
+    expect(mockSessionManager.kill).toHaveBeenCalledWith(
+      "app-1",
+      expect.objectContaining({ purgeOpenCode: true, onStep: expect.any(Function) }),
+    );
   });
 });
 
