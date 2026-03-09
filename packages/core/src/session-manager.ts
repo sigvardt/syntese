@@ -11,7 +11,7 @@
  * Reference: scripts/claude-ao-session, scripts/send-to-session
  */
 
-import { statSync, existsSync, readdirSync, writeFileSync, mkdirSync } from "node:fs";
+import { statSync, existsSync, readdirSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
 import { execFile } from "node:child_process";
 import { basename, join, resolve } from "node:path";
 import { homedir } from "node:os";
@@ -34,6 +34,8 @@ import {
   type ClaimPRResult,
   type OrchestratorConfig,
   type ProjectConfig,
+  type SessionKillOptions,
+  type SessionKillStepResult,
   type Runtime,
   type Agent,
   type Workspace,
@@ -69,6 +71,301 @@ import { normalizeOrchestratorSessionStrategy } from "./orchestrator-session-str
 const execFileAsync = promisify(execFile);
 const OPENCODE_DISCOVERY_TIMEOUT_MS = 2_000;
 const OPENCODE_INTERACTIVE_DISCOVERY_TIMEOUT_MS = 10_000;
+const PROCESS_LIST_TIMEOUT_MS = 5_000;
+const PROCESS_TERMINATION_TIMEOUT_MS = 5_000;
+const PROCESS_TERMINATION_POLL_MS = 200;
+const TMUX_KILL_TIMEOUT_MS = 5_000;
+const GIT_CLEANUP_TIMEOUT_MS = 30_000;
+
+interface ProcessSnapshot {
+  pid: number;
+  ppid: number;
+  command: string;
+}
+
+function getErrorCode(err: unknown): string | undefined {
+  if (!(err instanceof Error) || !("code" in err)) return undefined;
+  const code = err.code;
+  return typeof code === "string" ? code : undefined;
+}
+
+function getExitCode(err: unknown): number | null {
+  if (!(err instanceof Error) || !("code" in err)) return null;
+  const code = err.code;
+  return typeof code === "number" ? code : null;
+}
+
+function formatError(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+function emitKillStep(
+  options: SessionKillOptions | undefined,
+  result: SessionKillStepResult,
+): void {
+  options?.onStep?.(result);
+}
+
+function parsePid(raw: unknown): number | null {
+  const pid = typeof raw === "number" ? raw : Number(raw);
+  if (!Number.isFinite(pid) || pid <= 0) return null;
+  return pid;
+}
+
+async function isPidAlive(pid: number): Promise<boolean> {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err: unknown) {
+    return getErrorCode(err) === "EPERM";
+  }
+}
+
+function sendSignal(pid: number, signal: NodeJS.Signals): void {
+  try {
+    process.kill(pid, signal);
+  } catch (err: unknown) {
+    const code = getErrorCode(err);
+    if (code === "ESRCH") return;
+    throw err;
+  }
+}
+
+async function listProcesses(): Promise<ProcessSnapshot[]> {
+  const { stdout } = await execFileAsync("ps", ["-eo", "pid=,ppid=,args="], {
+    timeout: PROCESS_LIST_TIMEOUT_MS,
+  });
+
+  return stdout
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .flatMap((line) => {
+      const match = line.match(/^(\d+)\s+(\d+)\s+(.*)$/);
+      if (!match) return [];
+
+      const pid = Number(match[1]);
+      const ppid = Number(match[2]);
+      if (!Number.isFinite(pid) || !Number.isFinite(ppid) || pid <= 0 || ppid < 0) {
+        return [];
+      }
+
+      return [{ pid, ppid, command: match[3] ?? "" }];
+    });
+}
+
+function collectProcessTree(
+  processes: ProcessSnapshot[],
+  rootPids: Iterable<number>,
+): ProcessSnapshot[] {
+  const processByPid = new Map<number, ProcessSnapshot>();
+  const childrenByParent = new Map<number, number[]>();
+
+  for (const process of processes) {
+    processByPid.set(process.pid, process);
+    const children = childrenByParent.get(process.ppid) ?? [];
+    children.push(process.pid);
+    childrenByParent.set(process.ppid, children);
+  }
+
+  const queue = [...new Set([...rootPids].filter((pid) => pid > 0))];
+  const visited = new Set<number>();
+  const collected: ProcessSnapshot[] = [];
+
+  while (queue.length > 0) {
+    const pid = queue.shift();
+    if (pid === undefined || visited.has(pid)) continue;
+    visited.add(pid);
+
+    const process = processByPid.get(pid);
+    if (process) {
+      collected.push(process);
+    }
+
+    const children = childrenByParent.get(pid) ?? [];
+    for (const childPid of children) {
+      if (!visited.has(childPid)) {
+        queue.push(childPid);
+      }
+    }
+  }
+
+  return collected;
+}
+
+async function getTmuxPaneRootPids(sessionId: string): Promise<number[]> {
+  const { stdout } = await execFileAsync(
+    "tmux",
+    ["list-panes", "-t", sessionId, "-F", "#{pane_pid}"],
+    { timeout: TMUX_KILL_TIMEOUT_MS },
+  );
+
+  return [
+    ...new Set(
+      stdout
+        .split("\n")
+        .map((line) => Number(line.trim()))
+        .filter((pid) => Number.isFinite(pid) && pid > 0),
+    ),
+  ];
+}
+
+async function captureSessionProcessTree(handle: RuntimeHandle): Promise<ProcessSnapshot[]> {
+  const rootPids: number[] = [];
+
+  if (handle.runtimeName === "tmux" && handle.id) {
+    rootPids.push(...(await getTmuxPaneRootPids(handle.id)));
+  }
+
+  if (handle.runtimeName === "process") {
+    const pid = parsePid(handle.data["pid"]);
+    if (pid !== null) {
+      rootPids.push(pid);
+    }
+  }
+
+  if (rootPids.length === 0) {
+    return [];
+  }
+
+  const processes = await listProcesses();
+  return collectProcessTree(processes, rootPids);
+}
+
+async function terminateProcesses(processes: ProcessSnapshot[]): Promise<{
+  total: number;
+  forceKilled: number;
+  survivors: number[];
+}> {
+  const pids = [...new Set(processes.map((process) => process.pid).filter((pid) => pid > 0))];
+
+  if (pids.length === 0) {
+    return { total: 0, forceKilled: 0, survivors: [] };
+  }
+
+  for (const pid of pids) {
+    sendSignal(pid, "SIGTERM");
+  }
+
+  const deadline = Date.now() + PROCESS_TERMINATION_TIMEOUT_MS;
+  let survivors = await Promise.all(
+    pids.map(async (pid) => ((await isPidAlive(pid)) ? pid : null)),
+  ).then((alive) => alive.filter((pid): pid is number => pid !== null));
+
+  while (survivors.length > 0 && Date.now() < deadline) {
+    await sleep(PROCESS_TERMINATION_POLL_MS);
+    survivors = await Promise.all(
+      survivors.map(async (pid) => ((await isPidAlive(pid)) ? pid : null)),
+    ).then((alive) => alive.filter((pid): pid is number => pid !== null));
+  }
+
+  let forceKilled = 0;
+  if (survivors.length > 0) {
+    forceKilled = survivors.length;
+    for (const pid of survivors) {
+      sendSignal(pid, "SIGKILL");
+    }
+    await sleep(PROCESS_TERMINATION_POLL_MS);
+    survivors = await Promise.all(
+      survivors.map(async (pid) => ((await isPidAlive(pid)) ? pid : null)),
+    ).then((alive) => alive.filter((pid): pid is number => pid !== null));
+  }
+
+  return { total: pids.length, forceKilled, survivors };
+}
+
+async function hasTmuxSession(sessionId: string): Promise<boolean> {
+  try {
+    await execFileAsync("tmux", ["has-session", "-t", sessionId], {
+      timeout: TMUX_KILL_TIMEOUT_MS,
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function gitBranchExists(repoPath: string, branch: string): Promise<boolean> {
+  try {
+    await execFileAsync("git", ["show-ref", "--verify", "--quiet", `refs/heads/${branch}`], {
+      cwd: repoPath,
+      timeout: GIT_CLEANUP_TIMEOUT_MS,
+    });
+    return true;
+  } catch (err: unknown) {
+    if (getExitCode(err) === 1) {
+      return false;
+    }
+    throw err;
+  }
+}
+
+async function isGitWorktreeRegistered(repoPath: string, workspacePath: string): Promise<boolean> {
+  const { stdout } = await execFileAsync("git", ["worktree", "list", "--porcelain"], {
+    cwd: repoPath,
+    timeout: GIT_CLEANUP_TIMEOUT_MS,
+  });
+
+  const normalizedWorkspace = resolve(workspacePath);
+  return stdout.split("\n").some((line) => {
+    if (!line.startsWith("worktree ")) return false;
+    return resolve(line.slice("worktree ".length)) === normalizedWorkspace;
+  });
+}
+
+async function forceRemoveGitWorktree(repoPath: string, workspacePath: string): Promise<void> {
+  try {
+    await execFileAsync("git", ["worktree", "remove", "--force", workspacePath], {
+      cwd: repoPath,
+      timeout: GIT_CLEANUP_TIMEOUT_MS,
+    });
+  } catch {
+    // Fall through — we verify end state after prune + directory cleanup.
+  }
+
+  try {
+    await execFileAsync("git", ["worktree", "prune"], {
+      cwd: repoPath,
+      timeout: GIT_CLEANUP_TIMEOUT_MS,
+    });
+  } catch {
+    // Best effort — verification below decides success/failure.
+  }
+
+  if (existsSync(workspacePath)) {
+    rmSync(workspacePath, { recursive: true, force: true });
+  }
+
+  const stillExists = existsSync(workspacePath);
+  const stillRegistered = await isGitWorktreeRegistered(repoPath, workspacePath);
+  if (stillExists || stillRegistered) {
+    throw new Error(
+      [
+        stillRegistered ? `git still lists worktree ${workspacePath}` : null,
+        stillExists ? `directory still exists at ${workspacePath}` : null,
+      ]
+        .filter(Boolean)
+        .join("; "),
+    );
+  }
+}
+
+async function deleteLocalBranch(repoPath: string, branch: string): Promise<"deleted" | "missing"> {
+  if (!(await gitBranchExists(repoPath, branch))) {
+    return "missing";
+  }
+
+  await execFileAsync("git", ["branch", "-D", branch], {
+    cwd: repoPath,
+    timeout: GIT_CLEANUP_TIMEOUT_MS,
+  });
+
+  if (await gitBranchExists(repoPath, branch)) {
+    throw new Error(`branch ${branch} still exists after deletion attempt`);
+  }
+
+  return "deleted";
+}
 
 function errorIncludesSessionNotFound(err: unknown): boolean {
   if (!(err instanceof Error)) return false;
@@ -1248,41 +1545,279 @@ export function createSessionManager(deps: SessionManagerDeps): OpenCodeSessionM
     return null;
   }
 
-  async function kill(sessionId: SessionId, options?: { purgeOpenCode?: boolean }): Promise<void> {
+  async function kill(sessionId: SessionId, options?: SessionKillOptions): Promise<void> {
     const { raw, sessionsDir, project, projectId } = requireSessionRecord(sessionId);
 
-    const cleanupAgent = raw["agent"] ?? project?.agent ?? config.defaults.agent;
+    const cleanupAgent = raw["agent"] ?? project.agent ?? config.defaults.agent;
+    const plugins = resolvePlugins(project, cleanupAgent);
+    const worktree = raw["worktree"];
+    const branch = raw["branch"];
+    const runtimeHandleRaw = raw["runtimeHandle"];
+    const runtimeHandle = runtimeHandleRaw ? safeJsonParse<RuntimeHandle>(runtimeHandleRaw) : null;
+    const managedWorktree =
+      typeof worktree === "string" && shouldDestroyWorkspacePath(project, projectId, worktree);
+    const usesGitWorktreeCleanup =
+      (plugins.workspace?.name ?? project.workspace ?? config.defaults.workspace) === "worktree";
+    const failures: string[] = [];
 
-    // Destroy runtime — prefer handle.runtimeName to find the correct plugin
-    if (raw["runtimeHandle"]) {
-      const handle = safeJsonParse<RuntimeHandle>(raw["runtimeHandle"]);
-      if (handle) {
-        const runtimePlugin = registry.get<Runtime>(
-          "runtime",
-          handle.runtimeName ??
-            (project ? (project.runtime ?? config.defaults.runtime) : config.defaults.runtime),
-        );
-        if (runtimePlugin) {
-          try {
-            await runtimePlugin.destroy(handle);
-          } catch {
-            // Runtime might already be gone
-          }
-        }
+    const reportStep = (result: SessionKillStepResult): void => {
+      emitKillStep(options, result);
+      if (result.status === "failed") {
+        failures.push(`${result.step}: ${result.message}`);
+      }
+    };
+
+    let sessionProcesses: ProcessSnapshot[] = [];
+    let processDiscoveryError: string | null = null;
+    if (runtimeHandle) {
+      try {
+        sessionProcesses = await captureSessionProcessTree(runtimeHandle);
+      } catch (err: unknown) {
+        processDiscoveryError = formatError(err);
       }
     }
 
-    const worktree = raw["worktree"];
-    if (worktree && shouldDestroyWorkspacePath(project, projectId, worktree)) {
-      const workspacePlugin = project
-        ? resolvePlugins(project).workspace
-        : registry.get<Workspace>("workspace", config.defaults.workspace);
-      if (workspacePlugin) {
+    if (runtimeHandleRaw && !runtimeHandle) {
+      reportStep({
+        step: "runtime",
+        status: "failed",
+        message: "Invalid runtime handle metadata",
+      });
+    } else if (!runtimeHandle) {
+      reportStep({
+        step: "runtime",
+        status: "skipped",
+        message: "No runtime handle recorded",
+      });
+    } else {
+      const runtimeName = runtimeHandle.runtimeName || project.runtime || config.defaults.runtime;
+      const runtimePlugin = registry.get<Runtime>("runtime", runtimeName);
+      let runtimeCleanupError: string | null = null;
+
+      if (runtimePlugin) {
         try {
-          await workspacePlugin.destroy(worktree);
-        } catch {
-          // Workspace might already be gone
+          await runtimePlugin.destroy(runtimeHandle);
+        } catch (err: unknown) {
+          runtimeCleanupError = formatError(err);
         }
+      } else if (runtimeHandle.runtimeName !== "tmux") {
+        runtimeCleanupError = `Runtime plugin '${runtimeName}' not found`;
+      }
+
+      if (runtimeHandle.runtimeName === "tmux") {
+        let usedFallbackKill = false;
+        if (await hasTmuxSession(runtimeHandle.id)) {
+          try {
+            await execFileAsync("tmux", ["kill-session", "-t", runtimeHandle.id], {
+              timeout: TMUX_KILL_TIMEOUT_MS,
+            });
+            usedFallbackKill = true;
+          } catch (err: unknown) {
+            const fallbackError = formatError(err);
+            runtimeCleanupError = runtimeCleanupError
+              ? `${runtimeCleanupError}; fallback tmux kill failed: ${fallbackError}`
+              : fallbackError;
+          }
+        }
+
+        if (await hasTmuxSession(runtimeHandle.id)) {
+          reportStep({
+            step: "runtime",
+            status: "failed",
+            message: runtimeCleanupError
+              ? `Failed to kill tmux session ${runtimeHandle.id}: ${runtimeCleanupError}`
+              : `tmux session ${runtimeHandle.id} is still running`,
+          });
+        } else {
+          const extra = runtimeCleanupError
+            ? ` (runtime plugin reported: ${runtimeCleanupError})`
+            : usedFallbackKill
+              ? " (forced via direct tmux kill-session)"
+              : "";
+          reportStep({
+            step: "runtime",
+            status: "success",
+            message: `Killed tmux session ${runtimeHandle.id}${extra}`,
+          });
+        }
+      } else if (runtimeHandle.runtimeName === "process") {
+        const pid = parsePid(runtimeHandle.data["pid"]);
+        const alive = pid !== null ? await isPidAlive(pid) : false;
+        if (alive) {
+          reportStep({
+            step: "runtime",
+            status: "failed",
+            message: runtimeCleanupError
+              ? `Failed to stop process runtime ${runtimeHandle.id}: ${runtimeCleanupError}`
+              : `process ${pid} is still running`,
+          });
+        } else {
+          const extra = runtimeCleanupError
+            ? ` (runtime plugin reported: ${runtimeCleanupError})`
+            : "";
+          reportStep({
+            step: "runtime",
+            status: "success",
+            message: `Stopped process runtime ${runtimeHandle.id}${extra}`,
+          });
+        }
+      } else if (runtimeCleanupError) {
+        reportStep({
+          step: "runtime",
+          status: "failed",
+          message: `Failed to stop ${runtimeName} runtime ${runtimeHandle.id}: ${runtimeCleanupError}`,
+        });
+      } else {
+        reportStep({
+          step: "runtime",
+          status: "success",
+          message: `Stopped ${runtimeName} runtime ${runtimeHandle.id}`,
+        });
+      }
+    }
+
+    if (!runtimeHandle) {
+      reportStep({
+        step: "agent",
+        status: "skipped",
+        message: "No runtime handle available for process cleanup",
+      });
+    } else if (processDiscoveryError) {
+      reportStep({
+        step: "agent",
+        status: "failed",
+        message: `Could not discover session process tree: ${processDiscoveryError}`,
+      });
+    } else {
+      try {
+        const result = await terminateProcesses(sessionProcesses);
+        if (result.survivors.length > 0) {
+          reportStep({
+            step: "agent",
+            status: "failed",
+            message: `Processes still alive after SIGKILL: ${result.survivors.join(", ")}`,
+          });
+        } else if (result.total === 0) {
+          reportStep({
+            step: "agent",
+            status: "success",
+            message: "Session process tree already stopped",
+          });
+        } else {
+          const forcedDetail =
+            result.forceKilled > 0
+              ? `; escalated to SIGKILL for ${result.forceKilled} process${result.forceKilled === 1 ? "" : "es"}`
+              : "";
+          reportStep({
+            step: "agent",
+            status: "success",
+            message: `Stopped session process tree (${result.total} process${result.total === 1 ? "" : "es"}${forcedDetail})`,
+          });
+        }
+      } catch (err: unknown) {
+        reportStep({
+          step: "agent",
+          status: "failed",
+          message: `Failed to stop session process tree: ${formatError(err)}`,
+        });
+      }
+    }
+
+    if (worktree && managedWorktree) {
+      let workspaceCleanupError: string | null = null;
+      if (plugins.workspace) {
+        try {
+          await plugins.workspace.destroy(worktree);
+        } catch (err: unknown) {
+          workspaceCleanupError = formatError(err);
+        }
+      } else if (!usesGitWorktreeCleanup) {
+        workspaceCleanupError = "Workspace plugin not found";
+      }
+
+      if (!usesGitWorktreeCleanup) {
+        reportStep({
+          step: "worktree",
+          status: workspaceCleanupError ? "failed" : "success",
+          message: workspaceCleanupError
+            ? `Failed to remove workspace ${worktree}: ${workspaceCleanupError}`
+            : `Removed workspace ${worktree}`,
+        });
+      } else {
+        try {
+          await forceRemoveGitWorktree(project.path, worktree);
+          reportStep({
+            step: "worktree",
+            status: "success",
+            message: workspaceCleanupError
+              ? `Removed worktree ${worktree} (workspace plugin reported: ${workspaceCleanupError})`
+              : `Removed worktree ${worktree}`,
+          });
+        } catch (err: unknown) {
+          const detail = [
+            formatError(err),
+            workspaceCleanupError ? `workspace plugin reported: ${workspaceCleanupError}` : null,
+          ]
+            .filter(Boolean)
+            .join("; ");
+          reportStep({
+            step: "worktree",
+            status: "failed",
+            message: `Failed to remove worktree ${worktree}: ${detail}`,
+          });
+        }
+      }
+    } else if (worktree) {
+      reportStep({
+        step: "worktree",
+        status: "skipped",
+        message: `Skipped unmanaged workspace ${worktree}`,
+      });
+    } else {
+      reportStep({
+        step: "worktree",
+        status: "skipped",
+        message: "No workspace recorded",
+      });
+    }
+
+    if (!branch) {
+      reportStep({
+        step: "branch",
+        status: "skipped",
+        message: "No branch recorded",
+      });
+    } else if (branch === project.defaultBranch) {
+      reportStep({
+        step: "branch",
+        status: "skipped",
+        message: `Skipped default branch ${branch}`,
+      });
+    } else if (!managedWorktree || !usesGitWorktreeCleanup) {
+      reportStep({
+        step: "branch",
+        status: "skipped",
+        message: usesGitWorktreeCleanup
+          ? `Skipped local branch cleanup for unmanaged workspace ${worktree ?? "(unknown)"}`
+          : `Skipped local branch cleanup for non-worktree session ${sessionId}`,
+      });
+    } else {
+      try {
+        const branchResult = await deleteLocalBranch(project.path, branch);
+        reportStep({
+          step: "branch",
+          status: "success",
+          message:
+            branchResult === "deleted"
+              ? `Deleted local branch ${branch}`
+              : `Local branch ${branch} already absent`,
+        });
+      } catch (err: unknown) {
+        reportStep({
+          step: "branch",
+          status: "failed",
+          message: `Failed to delete local branch ${branch}: ${formatError(err)}`,
+        });
       }
     }
 
@@ -1299,16 +1834,49 @@ export function createSessionManager(deps: SessionManagerDeps): OpenCodeSessionM
         try {
           await deleteOpenCodeSession(mappedOpenCodeSessionId);
           didPurgeOpenCodeSession = true;
-        } catch {
-          void 0;
+          reportStep({
+            step: "opencode",
+            status: "success",
+            message: `Deleted OpenCode session ${mappedOpenCodeSessionId}`,
+          });
+        } catch (err: unknown) {
+          reportStep({
+            step: "opencode",
+            status: "failed",
+            message: `Failed to delete OpenCode session ${mappedOpenCodeSessionId}: ${formatError(err)}`,
+          });
         }
+      } else {
+        reportStep({
+          step: "opencode",
+          status: "skipped",
+          message: "No OpenCode session mapping found",
+        });
       }
     }
 
-    // Archive metadata
-    deleteMetadata(sessionsDir, sessionId, true);
-    if (didPurgeOpenCodeSession) {
-      markArchivedOpenCodeCleanup(sessionsDir, sessionId);
+    try {
+      deleteMetadata(sessionsDir, sessionId, true);
+      if (didPurgeOpenCodeSession) {
+        markArchivedOpenCodeCleanup(sessionsDir, sessionId);
+      }
+      reportStep({
+        step: "metadata",
+        status: "success",
+        message: `Archived metadata for ${sessionId}`,
+      });
+    } catch (err: unknown) {
+      reportStep({
+        step: "metadata",
+        status: "failed",
+        message: `Failed to archive metadata for ${sessionId}: ${formatError(err)}`,
+      });
+    }
+
+    if (failures.length > 0) {
+      throw new Error(
+        `Session ${sessionId} cleanup completed with ${failures.length} failure${failures.length === 1 ? "" : "s"}: ${failures.join("; ")}`,
+      );
     }
   }
 

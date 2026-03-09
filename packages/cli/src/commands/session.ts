@@ -1,10 +1,29 @@
 import { spawn } from "node:child_process";
 import chalk from "chalk";
 import type { Command } from "commander";
-import { loadConfig, SessionNotRestorableError, WorkspaceMissingError } from "@composio/ao-core";
+import {
+  loadConfig,
+  SessionNotRestorableError,
+  WorkspaceMissingError,
+  type SessionKillStepResult,
+} from "@composio/ao-core";
 import { git, getTmuxActivity, tmux } from "../lib/shell.js";
 import { formatAge } from "../lib/format.js";
 import { getSessionManager } from "../lib/create-session-manager.js";
+
+function logKillStep(result: SessionKillStepResult): void {
+  if (result.status === "success") {
+    console.log(`${chalk.green("✓")} ${chalk.green(result.message)}`);
+    return;
+  }
+
+  if (result.status === "failed") {
+    console.log(`${chalk.red("✗")} ${chalk.red(result.message)}`);
+    return;
+  }
+
+  console.log(`${chalk.dim("-")} ${chalk.dim(result.message)}`);
+}
 
 export function registerSession(program: Command): void {
   const session = program
@@ -117,7 +136,10 @@ export function registerSession(program: Command): void {
       const sm = await getSessionManager(config);
 
       try {
-        await sm.kill(sessionName, { purgeOpenCode: opts.purgeSession === true });
+        await sm.kill(sessionName, {
+          purgeOpenCode: opts.purgeSession === true,
+          onStep: logKillStep,
+        });
         console.log(chalk.green(`\nSession ${sessionName} killed.`));
       } catch (err) {
         console.error(chalk.red(`Failed to kill session ${sessionName}: ${err}`));
