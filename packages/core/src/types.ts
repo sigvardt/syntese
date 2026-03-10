@@ -768,6 +768,7 @@ export type EventType =
   // Session lifecycle
   | "session.spawned"
   | "session.working"
+  | "session.completed"
   | "session.exited"
   | "session.killed"
   | "session.stuck"
