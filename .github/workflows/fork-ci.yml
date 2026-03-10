@@ -1,0 +1,80 @@
+name: Fork CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: fork-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    if: github.repository == 'sigvardt/agent-orchestrator'
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run lint
+
+  typecheck:
+    if: github.repository == 'sigvardt/agent-orchestrator'
+    name: Typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Build non-web packages
+        run: pnpm -r --filter '!@composio/ao-web' build
+      - name: Typecheck non-web packages
+        run: pnpm -r --filter '!@composio/ao-web' typecheck
+      - name: Build web
+        run: pnpm --filter @composio/ao-web build
+
+  test:
+    if: github.repository == 'sigvardt/agent-orchestrator'
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Build non-web packages
+        run: pnpm -r --filter '!@composio/ao-web' build
+      - name: Run package unit tests
+        run: pnpm test
+
+  test-web:
+    if: github.repository == 'sigvardt/agent-orchestrator'
+    name: Test (Web Unit)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Build non-web packages
+        run: pnpm -r --filter '!@composio/ao-web' build
+      - name: Run web server unit tests
+        working-directory: packages/web
+        run: pnpm exec vitest run server/__tests__/server-compatibility.test.ts server/__tests__/tmux-utils.test.ts
