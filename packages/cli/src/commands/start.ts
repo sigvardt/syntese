@@ -429,7 +429,7 @@ export function registerStart(program: Command): void {
 export function registerStop(program: Command): void {
   program
     .command("stop [project]")
-    .description("Stop orchestrator agent for a project")
+    .description("Stop orchestrator agent and dashboard for a project")
     .option("--keep-session", "Keep mapped OpenCode session after stopping")
     .option("--purge-session", "Delete mapped OpenCode session when stopping")
     .action(
@@ -438,6 +438,7 @@ export function registerStop(program: Command): void {
           const config = loadConfig();
           const { projectId: _projectId, project } = resolveProject(config, projectArg);
           const sessionId = `${project.sessionPrefix}-orchestrator`;
+          const port = config.port ?? 3000;
 
           console.log(chalk.bold(`\nStopping orchestrator for ${chalk.cyan(project.name)}\n`));
 
@@ -461,6 +462,8 @@ export function registerStop(program: Command): void {
             console.log(chalk.yellow("Lifecycle worker not running"));
           }
 
+          // Stop dashboard
+          await stopDashboard(port);
           console.log(chalk.bold.green("\n✓ Orchestrator stopped\n"));
         } catch (err) {
           if (err instanceof Error) {
