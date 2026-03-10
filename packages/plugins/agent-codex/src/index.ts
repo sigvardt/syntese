@@ -336,6 +336,9 @@ interface CodexJsonlLine {
   type?: string;
   cwd?: string;
   model?: string;
+  payload?: {
+    cwd?: string;
+  };
   // Thread ID from thread_started notifications
   threadId?: string;
   // User message content (from user input events)
@@ -386,6 +389,10 @@ interface CodexEventMessage {
   output_tokens?: number;
   info?: CodexTokenUsageInfo | null;
   rate_limits?: CodexRateLimitSnapshot | CodexRateLimitSnapshot[] | null;
+}
+
+function getSessionMetaCwd(entry: CodexJsonlLine): string | undefined {
+  return entry.cwd ?? entry.payload?.cwd;
 }
 
 /**
@@ -458,13 +465,10 @@ async function sessionFileMatchesCwd(
       if (!trimmed) continue;
       try {
         const parsed: unknown = JSON.parse(trimmed);
-        if (
-          typeof parsed === "object" &&
-          parsed !== null &&
-          !Array.isArray(parsed) &&
-          (parsed as CodexJsonlLine).type === "session_meta" &&
-          (parsed as CodexJsonlLine).cwd === workspacePath
-        ) {
+        if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) continue;
+
+        const entry = parsed as CodexJsonlLine;
+        if (entry.type === "session_meta" && getSessionMetaCwd(entry) === workspacePath) {
           return true;
         }
       } catch {
