@@ -1,5 +1,5 @@
-import type { AoCliRunner } from "./ao-cli.js";
-import { createAoCliRunner } from "./ao-cli.js";
+import { createAoCliRunner, type AoCliRunner } from "./ao-cli.js";
+import { summarizeSessionStates } from "./session-classification.js";
 
 export type AoAutoReplyCommandType = "status" | "sessions" | "retry" | "kill";
 
@@ -37,9 +37,8 @@ const DEFAULT_RETRY_MESSAGE = "Please retry your current task and post a brief s
 
 export function parseAoAutoReplyCommand(text: string): AoAutoReplyCommand | null {
   const input = text.trim();
-  if (!input.startsWith("/ao")) return null;
-
   const parts = input.split(/\s+/).filter(Boolean);
+  if (parts[0] !== "/ao") return null;
   if (parts.length < 2) return null;
 
   const command = parts[1]?.toLowerCase();
@@ -65,43 +64,6 @@ export function parseAoAutoReplyCommand(text: string): AoAutoReplyCommand | null
   }
 
   return null;
-}
-
-function summarizeSessions(sessions: AoSessionInfo[]): {
-  total: number;
-  active: number;
-  degraded: number;
-  dead: number;
-} {
-  let active = 0;
-  let degraded = 0;
-  let dead = 0;
-
-  for (const session of sessions) {
-    const status = (session.status ?? "").toLowerCase();
-    const activity = (session.activity ?? "").toLowerCase();
-
-    if (activity === "active" || status === "working") {
-      active += 1;
-      continue;
-    }
-
-    if (["killed", "dead", "crashed", "failed", "error"].includes(status)) {
-      dead += 1;
-      continue;
-    }
-
-    if (["blocked", "stuck", "unknown"].includes(status) || activity === "inactive") {
-      degraded += 1;
-    }
-  }
-
-  return {
-    total: sessions.length,
-    active,
-    degraded,
-    dead,
-  };
 }
 
 async function readSessions(runner: AoCliRunner): Promise<{
@@ -164,7 +126,7 @@ export async function executeAoAutoReplyCommand(
       };
     }
 
-    const summary = summarizeSessions(sessionsResponse.sessions);
+    const summary = summarizeSessionStates(sessionsResponse.sessions);
     const ids = sessionsResponse.sessions.map((s) => s.name).join(",") || "none";
 
     return {
@@ -187,7 +149,7 @@ export async function executeAoAutoReplyCommand(
     }
 
     if (!command.sessionId) {
-      const summary = summarizeSessions(sessionsResponse.sessions);
+      const summary = summarizeSessionStates(sessionsResponse.sessions);
       return {
         ok: true,
         code: "ok",

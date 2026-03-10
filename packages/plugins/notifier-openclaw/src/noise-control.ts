@@ -121,7 +121,9 @@ export class EscalationNoiseController {
 
   private startBatch(firstEvent: OrchestratorEvent): void {
     const timer = setTimeout(() => {
-      void this.flushAndNotify();
+      this.flushAndNotify().catch((error) => {
+        console.error("[notifier-openclaw] Failed to flush escalation batch:", error);
+      });
     }, this.batchWindowMs);
 
     this.burstState.activeBatch = {

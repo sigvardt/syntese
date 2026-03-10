@@ -26,6 +26,7 @@ describe("openclaw command parsing", () => {
 
   it("rejects invalid commands", () => {
     expect(parseAoAutoReplyCommand("hello")).toBeNull();
+    expect(parseAoAutoReplyCommand("/aobot sessions")).toBeNull();
     expect(parseAoAutoReplyCommand("/ao retry")).toBeNull();
     expect(parseAoAutoReplyCommand("/ao unknown")).toBeNull();
   });

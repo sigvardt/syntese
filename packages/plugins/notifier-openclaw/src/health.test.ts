@@ -71,4 +71,32 @@ describe("health polling", () => {
     service.stop();
     vi.useRealTimers();
   });
+
+  it("catches onSummary errors and keeps polling", async () => {
+    vi.useFakeTimers();
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const runner: AoCliRunner = async () => ({
+      ok: true,
+      stdout: JSON.stringify([{ name: "ao-1", status: "working", activity: "active", lastActivity: "1m" }]),
+      stderr: "",
+      exitCode: 0,
+    });
+    const onSummary = vi.fn().mockRejectedValue(new Error("sink failed"));
+
+    const service = new AoHealthPollingService({ runner, pollIntervalMs: 1000, onSummary });
+    service.start();
+
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(1000);
+
+    expect(onSummary).toHaveBeenCalledTimes(2);
+    expect(errorSpy).toHaveBeenCalledWith(
+      "[notifier-openclaw] AO health polling failed:",
+      expect.any(Error),
+    );
+
+    service.stop();
+    vi.useRealTimers();
+  });
 });

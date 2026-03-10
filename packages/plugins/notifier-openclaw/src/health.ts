@@ -1,6 +1,6 @@
-import type { AoCliRunner } from "./ao-cli.js";
-import { createAoCliRunner } from "./ao-cli.js";
+import { createAoCliRunner, type AoCliRunner } from "./ao-cli.js";
 import type { AoAutoReplyMetrics, AoSessionInfo } from "./commands.js";
+import { classifySessionState } from "./session-classification.js";
 
 export interface AoHealthSummary {
   timestamp: string;
@@ -52,14 +52,12 @@ function classify(sessions: AoSessionInfo[], staleAfterMinutes: number): Omit<Ao
   const staleSessions: string[] = [];
 
   for (const session of sessions) {
-    const status = (session.status ?? "").toLowerCase();
-    const activity = (session.activity ?? "").toLowerCase();
-
-    if (activity === "active" || status === "working") {
+    const sessionState = classifySessionState(session);
+    if (sessionState === "active") {
       active += 1;
-    } else if (["killed", "dead", "crashed", "failed", "error"].includes(status)) {
+    } else if (sessionState === "dead") {
       dead += 1;
-    } else if (["blocked", "stuck", "unknown"].includes(status) || activity === "inactive") {
+    } else if (sessionState === "degraded") {
       degraded += 1;
     }
 
@@ -152,9 +150,13 @@ export class AoHealthPollingService {
   start(): void {
     if (this.timer) return;
     this.timer = setInterval(() => {
-      void this.pollOnce();
+      this.pollOnce().catch((error) => {
+        console.error("[notifier-openclaw] AO health polling failed:", error);
+      });
     }, this.pollIntervalMs);
-    void this.pollOnce();
+    this.pollOnce().catch((error) => {
+      console.error("[notifier-openclaw] AO health polling failed:", error);
+    });
   }
 
   stop(): void {
