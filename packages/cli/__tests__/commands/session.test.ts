@@ -410,7 +410,10 @@ describe("session kill", () => {
 
     await program.parseAsync(["node", "test", "session", "kill", "app-1"]);
 
-    expect(mockSessionManager.kill).toHaveBeenCalledWith("app-1", { purgeOpenCode: true });
+    expect(mockSessionManager.kill).toHaveBeenCalledWith(
+      "app-1",
+      expect.objectContaining({ purgeOpenCode: true, onStep: expect.any(Function) }),
+    );
   });
 });
 

@@ -5,6 +5,7 @@ import { create, manifest } from "./index.js";
 function makeEvent(overrides: Partial<OrchestratorEvent> = {}): OrchestratorEvent {
   return {
     id: "evt-1",
+    idempotencyKey: "evt-1:key",
     type: "reaction.escalated",
     priority: "urgent",
     sessionId: "ao-5",

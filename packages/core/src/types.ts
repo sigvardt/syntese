@@ -1309,6 +1309,7 @@ export interface SessionKillOptions {
 
 export interface ClaimPROptions {
   assignOnGithub?: boolean;
+  takeover?: boolean;
 }
 
 export interface ClaimPRResult {

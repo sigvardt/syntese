@@ -43,6 +43,16 @@ function makeConfig(rootDir: string): OrchestratorConfig {
       info: ["desktop"],
     },
     reactions: {},
+    progressChecks: {
+      enabled: false,
+      intervalMinutes: 10,
+      terminalLines: 50,
+      signals: {
+        errorPatterns: ["Error:", "FAIL", "TypeError", "ECONNREFUSED"],
+        testPatterns: ["npm test", "pnpm test", "pytest", "cargo test", "go test"],
+        livePatterns: [],
+      },
+    },
   };
 }
 
