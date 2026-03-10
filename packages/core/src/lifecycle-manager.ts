@@ -273,6 +273,8 @@ function statusToEventType(_from: SessionStatus | undefined, to: SessionStatus):
       return "merge.completed";
     case "needs_input":
       return "session.needs_input";
+    case "idle":
+      return "session.idle";
     case "stuck":
       return "session.stuck";
     case "errored":
@@ -297,6 +299,8 @@ function eventToReactionKey(eventType: EventType): string | null {
       return "merge-conflicts";
     case "merge.ready":
       return "approved-and-green";
+    case "session.idle":
+      return "agent-idle";
     case "session.stuck":
       return "agent-stuck";
     case "session.needs_input":

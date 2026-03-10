@@ -72,6 +72,25 @@ export type { VerificationEvaluation, VerificationExecution } from "./verificati
 export { buildPrompt, BASE_AGENT_PROMPT } from "./prompt-builder.js";
 export type { PromptBuildConfig } from "./prompt-builder.js";
 
+// Decomposer — LLM-driven task decomposition
+export {
+  decompose,
+  getLeaves,
+  getSiblings,
+  formatPlanTree,
+  formatLineage,
+  formatSiblings,
+  propagateStatus,
+  DEFAULT_DECOMPOSER_CONFIG,
+} from "./decomposer.js";
+export type {
+  TaskNode,
+  TaskKind,
+  TaskStatus,
+  DecompositionPlan,
+  DecomposerConfig,
+} from "./decomposer.js";
+
 // Orchestrator prompt — generates orchestrator context for `ao start`
 export { generateOrchestratorPrompt } from "./orchestrator-prompt.js";
 export type { OrchestratorPromptConfig } from "./orchestrator-prompt.js";

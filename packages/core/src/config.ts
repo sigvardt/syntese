@@ -112,6 +112,20 @@ const VerificationConfigSchema = z.object({
   evidence: VerificationEvidenceSchema.optional(),
 });
 
+const DecomposerConfigSchema = z
+  .object({
+    enabled: z.boolean().default(false),
+    maxDepth: z.number().min(1).max(5).default(3),
+    model: z.string().default("claude-sonnet-4-20250514"),
+    requireApproval: z.boolean().default(true),
+  })
+  .default({
+    enabled: false,
+    maxDepth: 3,
+    model: "claude-sonnet-4-20250514",
+    requireApproval: true,
+  });
+
 const ProjectConfigSchema = z.object({
   name: z.string().optional(),
   repo: z.string(),
@@ -138,6 +152,7 @@ const ProjectConfigSchema = z.object({
     .enum(["reuse", "delete", "ignore", "delete-new", "ignore-new", "kill-previous"])
     .optional(),
   opencodeIssueSessionStrategy: z.enum(["reuse", "delete", "ignore"]).optional(),
+  decomposer: DecomposerConfigSchema.optional(),
   progressChecks: ProjectProgressChecksSchema.optional(),
 });
 
@@ -307,6 +322,14 @@ function applyDefaultReactions(config: OrchestratorConfig): OrchestratorConfig {
       action: "notify",
       priority: "action",
       message: "PR is ready to merge",
+    },
+    "agent-idle": {
+      auto: true,
+      action: "send-to-agent",
+      message:
+        "You appear to be idle. If your task is not complete, continue working — write the code, commit, push, and create a PR. If you are blocked, explain what is blocking you.",
+      retries: 2,
+      escalateAfter: "15m",
     },
     "agent-stuck": {
       auto: true,
