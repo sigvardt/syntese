@@ -62,6 +62,174 @@ async function gh(args: string[]): Promise<string> {
   }
 }
 
+async function ghInDir(args: string[], cwd: string): Promise<string> {
+  try {
+    const { stdout } = await execFileAsync("gh", args, {
+      cwd,
+      maxBuffer: 10 * 1024 * 1024,
+      timeout: 30_000,
+    });
+    return stdout.trim();
+  } catch (err) {
+    throw new Error(`gh ${args.slice(0, 3).join(" ")} failed: ${(err as Error).message}`, {
+      cause: err,
+    });
+  }
+}
+
+async function git(args: string[], cwd: string): Promise<string> {
+  try {
+    const { stdout } = await execFileAsync("git", args, {
+      cwd,
+      maxBuffer: 10 * 1024 * 1024,
+      timeout: 30_000,
+    });
+    return stdout.trim();
+  } catch (err) {
+    throw new Error(`git ${args.slice(0, 3).join(" ")} failed: ${(err as Error).message}`, {
+      cause: err,
+    });
+  }
+}
+
+function parseProjectRepo(projectRepo: string): [string, string] {
+  const parts = projectRepo.split("/");
+  if (parts.length !== 2 || !parts[0] || !parts[1]) {
+    throw new Error(`Invalid repo format "${projectRepo}", expected "owner/repo"`);
+  }
+  return [parts[0], parts[1]];
+}
+
+function prInfoFromView(
+  data: {
+    number: number;
+    url: string;
+    title: string;
+    headRefName: string;
+    baseRefName: string;
+    isDraft: boolean;
+  },
+  projectRepo: string,
+): PRInfo {
+  const [owner, repo] = parseProjectRepo(projectRepo);
+
+  return {
+    number: data.number,
+    url: data.url,
+    title: data.title,
+    owner,
+    repo,
+    branch: data.headRefName,
+    baseBranch: data.baseRefName,
+    isDraft: data.isDraft,
+  };
+}
+
+function isUnsupportedPrChecksJsonError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  return /pr checks/i.test(err.message) && /unknown json field/i.test(err.message);
+}
+
+function mapRawCheckStateToStatus(rawState: string | undefined): CICheck["status"] {
+  const state = (rawState ?? "").toUpperCase();
+  if (state === "IN_PROGRESS") return "running";
+  if (
+    state === "PENDING" ||
+    state === "QUEUED" ||
+    state === "REQUESTED" ||
+    state === "WAITING" ||
+    state === "EXPECTED"
+  ) {
+    return "pending";
+  }
+  if (state === "SUCCESS") return "passed";
+  if (
+    state === "FAILURE" ||
+    state === "TIMED_OUT" ||
+    state === "CANCELLED" ||
+    state === "ACTION_REQUIRED" ||
+    state === "ERROR"
+  ) {
+    return "failed";
+  }
+  if (
+    state === "SKIPPED" ||
+    state === "NEUTRAL" ||
+    state === "STALE" ||
+    state === "NOT_REQUIRED" ||
+    state === "NONE" ||
+    state === ""
+  ) {
+    return "skipped";
+  }
+
+  return "skipped";
+}
+
+async function getCIChecksFromStatusRollup(pr: PRInfo): Promise<CICheck[]> {
+  const raw = await gh([
+    "pr",
+    "view",
+    String(pr.number),
+    "--repo",
+    repoFlag(pr),
+    "--json",
+    "statusCheckRollup",
+  ]);
+
+  const data: { statusCheckRollup?: unknown[] } = JSON.parse(raw);
+  const rollup = Array.isArray(data.statusCheckRollup) ? data.statusCheckRollup : [];
+
+  return rollup
+    .map((entry): CICheck | null => {
+      if (!entry || typeof entry !== "object") return null;
+      const row = entry as Record<string, unknown>;
+      const name =
+        (typeof row["name"] === "string" && row["name"]) ||
+        (typeof row["context"] === "string" && row["context"]);
+      if (!name) return null;
+
+      const rawState =
+        typeof row["conclusion"] === "string"
+          ? row["conclusion"]
+          : typeof row["state"] === "string"
+            ? row["state"]
+            : typeof row["status"] === "string"
+              ? row["status"]
+              : undefined;
+
+      const url =
+        (typeof row["link"] === "string" && row["link"]) ||
+        (typeof row["detailsUrl"] === "string" && row["detailsUrl"]) ||
+        (typeof row["targetUrl"] === "string" && row["targetUrl"]) ||
+        undefined;
+
+      const startedAtRaw =
+        typeof row["startedAt"] === "string"
+          ? row["startedAt"]
+          : typeof row["createdAt"] === "string"
+            ? row["createdAt"]
+            : undefined;
+      const completedAtRaw =
+        typeof row["completedAt"] === "string" ? row["completedAt"] : undefined;
+
+      const check: CICheck = {
+        name,
+        status: mapRawCheckStateToStatus(rawState),
+        conclusion: typeof rawState === "string" ? rawState.toUpperCase() : undefined,
+        startedAt: startedAtRaw ? new Date(startedAtRaw) : undefined,
+        completedAt: completedAtRaw ? new Date(completedAtRaw) : undefined,
+      };
+
+      if (url) {
+        check.url = url;
+      }
+
+      return check;
+    })
+    .filter((check): check is CICheck => check !== null);
+}
+
 function getHeader(
   headers: Record<string, string | string[] | undefined>,
   name: string,
@@ -351,12 +519,7 @@ function createGitHubSCM(): SCM {
 
     async detectPR(session: Session, project: ProjectConfig): Promise<PRInfo | null> {
       if (!session.branch) return null;
-
-      const parts = project.repo.split("/");
-      if (parts.length !== 2 || !parts[0] || !parts[1]) {
-        throw new Error(`Invalid repo format "${project.repo}", expected "owner/repo"`);
-      }
-      const [owner, repo] = parts;
+      parseProjectRepo(project.repo);
       try {
         const raw = await gh([
           "pr",
@@ -382,20 +545,52 @@ function createGitHubSCM(): SCM {
 
         if (prs.length === 0) return null;
 
-        const pr = prs[0];
-        return {
-          number: pr.number,
-          url: pr.url,
-          title: pr.title,
-          owner,
-          repo,
-          branch: pr.headRefName,
-          baseBranch: pr.baseRefName,
-          isDraft: pr.isDraft,
-        };
+        return prInfoFromView(prs[0], project.repo);
       } catch {
         return null;
       }
+    },
+
+    async resolvePR(reference: string, project: ProjectConfig): Promise<PRInfo> {
+      const raw = await gh([
+        "pr",
+        "view",
+        reference,
+        "--repo",
+        project.repo,
+        "--json",
+        "number,url,title,headRefName,baseRefName,isDraft",
+      ]);
+
+      const data: {
+        number: number;
+        url: string;
+        title: string;
+        headRefName: string;
+        baseRefName: string;
+        isDraft: boolean;
+      } = JSON.parse(raw);
+
+      return prInfoFromView(data, project.repo);
+    },
+
+    async assignPRToCurrentUser(pr: PRInfo): Promise<void> {
+      await gh(["pr", "edit", String(pr.number), "--repo", repoFlag(pr), "--add-assignee", "@me"]);
+    },
+
+    async checkoutPR(pr: PRInfo, workspacePath: string): Promise<boolean> {
+      const currentBranch = await git(["branch", "--show-current"], workspacePath);
+      if (currentBranch === pr.branch) return false;
+
+      const dirty = await git(["status", "--porcelain"], workspacePath);
+      if (dirty) {
+        throw new Error(
+          `Workspace has uncommitted changes; cannot switch to PR branch "${pr.branch}" safely`,
+        );
+      }
+
+      await ghInDir(["pr", "checkout", String(pr.number), "--repo", repoFlag(pr)], workspacePath);
+      return true;
     },
 
     async getPRState(pr: PRInfo): Promise<PRState> {
@@ -472,43 +667,21 @@ function createGitHubSCM(): SCM {
         }> = JSON.parse(raw);
 
         return checks.map((c) => {
-          let status: CICheck["status"];
           const state = c.state?.toUpperCase();
-
-          // gh pr checks returns state directly: SUCCESS, FAILURE, PENDING, QUEUED, etc.
-          if (state === "PENDING" || state === "QUEUED") {
-            status = "pending";
-          } else if (state === "IN_PROGRESS") {
-            status = "running";
-          } else if (state === "SUCCESS") {
-            status = "passed";
-          } else if (
-            state === "FAILURE" ||
-            state === "TIMED_OUT" ||
-            state === "CANCELLED" ||
-            state === "ACTION_REQUIRED"
-          ) {
-            status = "failed";
-          } else if (state === "SKIPPED" || state === "NEUTRAL") {
-            status = "skipped";
-          } else {
-            // Unknown state on a check — fail closed for safety
-            status = "failed";
-          }
 
           return {
             name: c.name,
-            status,
+            status: mapRawCheckStateToStatus(state),
             url: c.link || undefined,
-            conclusion: state || undefined, // Store original state for debugging
+            conclusion: state || undefined,
             startedAt: c.startedAt ? new Date(c.startedAt) : undefined,
             completedAt: c.completedAt ? new Date(c.completedAt) : undefined,
           };
         });
       } catch (err) {
-        // Propagate so callers (getCISummary) can decide how to handle.
-        // Do NOT silently return [] — that causes a fail-open where CI
-        // appears healthy when we simply failed to fetch check status.
+        if (isUnsupportedPrChecksJsonError(err)) {
+          return getCIChecksFromStatusRollup(pr);
+        }
         throw new Error("Failed to fetch CI checks", { cause: err });
       }
     },

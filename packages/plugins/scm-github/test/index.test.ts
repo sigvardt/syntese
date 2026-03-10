@@ -306,6 +306,39 @@ describe("scm-github plugin", () => {
       const result = await scm.detectPR(makeSession(), project);
       expect(result?.isDraft).toBe(true);
     });
+
+    it("resolves PR by reference", async () => {
+      mockGh({
+        number: 42,
+        url: "https://github.com/acme/repo/pull/42",
+        title: "feat: add feature",
+        headRefName: "feat/my-feature",
+        baseRefName: "main",
+        isDraft: false,
+      });
+
+      const result = await scm.resolvePR?.("42", project);
+      expect(result).toEqual(pr);
+    });
+
+    it("assigns PR to current user", async () => {
+      ghMock.mockResolvedValueOnce({ stdout: "" });
+      await scm.assignPRToCurrentUser?.(pr);
+      expect(ghMock).toHaveBeenCalledWith(
+        "gh",
+        ["pr", "edit", "42", "--repo", "acme/repo", "--add-assignee", "@me"],
+        expect.any(Object),
+      );
+    });
+
+    it("checks out PR when workspace is clean and branch differs", async () => {
+      ghMock.mockResolvedValueOnce({ stdout: "main\n" });
+      ghMock.mockResolvedValueOnce({ stdout: "" });
+      ghMock.mockResolvedValueOnce({ stdout: "" });
+
+      const changed = await scm.checkoutPR?.(pr, "/tmp/repo");
+      expect(changed).toBe(true);
+    });
   });
 
   // ---- getPRState --------------------------------------------------------
@@ -434,6 +467,25 @@ describe("scm-github plugin", () => {
       expect(checks[0].url).toBeUndefined();
       expect(checks[0].startedAt).toBeUndefined();
       expect(checks[0].completedAt).toBeUndefined();
+    });
+
+    it("falls back to statusCheckRollup when pr checks json is unsupported", async () => {
+      mockGhError("gh pr checks failed: unknown json field 'state'");
+      mockGh({
+        statusCheckRollup: [
+          {
+            name: "build",
+            state: "SUCCESS",
+            detailsUrl: "https://ci/1",
+            startedAt: "2025-01-01T00:00:00Z",
+            completedAt: "2025-01-01T00:01:00Z",
+          },
+        ],
+      });
+
+      const checks = await scm.getCIChecks(pr);
+      expect(checks).toHaveLength(1);
+      expect(checks[0]).toMatchObject({ name: "build", status: "passed" });
     });
   });
 
