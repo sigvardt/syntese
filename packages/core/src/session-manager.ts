@@ -313,7 +313,10 @@ async function isGitWorktreeRegistered(repoPath: string, workspacePath: string):
   });
 }
 
-async function forceRemoveGitWorktree(repoPath: string, workspacePath: string): Promise<void> {
+export async function forceRemoveGitWorktree(
+  repoPath: string,
+  workspacePath: string,
+): Promise<void> {
   try {
     await execFileAsync("git", ["worktree", "remove", "--force", workspacePath], {
       cwd: repoPath,
@@ -350,7 +353,10 @@ async function forceRemoveGitWorktree(repoPath: string, workspacePath: string): 
   }
 }
 
-async function deleteLocalBranch(repoPath: string, branch: string): Promise<"deleted" | "missing"> {
+export async function deleteLocalBranch(
+  repoPath: string,
+  branch: string,
+): Promise<"deleted" | "missing"> {
   if (!(await gitBranchExists(repoPath, branch))) {
     return "missing";
   }
