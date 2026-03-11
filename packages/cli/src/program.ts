@@ -12,6 +12,7 @@ import { registerStart, registerStop } from "./commands/start.js";
 import { registerLifecycleWorker } from "./commands/lifecycle-worker.js";
 import { registerServices } from "./commands/services.js";
 import { registerVerify } from "./commands/verify.js";
+import { registerCapacity } from "./commands/capacity.js";
 
 export function createProgram(): Command {
   const program = new Command();
@@ -36,6 +37,7 @@ export function createProgram(): Command {
   registerOpen(program);
   registerLifecycleWorker(program);
   registerVerify(program);
+  registerCapacity(program);
 
   return program;
 }

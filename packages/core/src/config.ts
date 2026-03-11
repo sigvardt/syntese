@@ -212,6 +212,24 @@ const DefaultPluginsSchema = z.object({
   notifiers: z.array(z.string()).default(["composio", "desktop"]),
 });
 
+const AccountBaseQuotaSchema = z.object({
+  estimatedTotal: z.number().positive(),
+  windowHours: z.number().positive().optional(),
+});
+
+const AccountOverageSchema = z.object({
+  enabled: z.boolean(),
+  type: z.enum(["credits", "api-rates"]).optional(),
+  spendCap: z.number().nonnegative().optional(),
+});
+
+const AccountConfigSchema = z.object({
+  agent: z.string(),
+  model: z.string().optional(),
+  baseQuota: AccountBaseQuotaSchema.optional(),
+  overage: AccountOverageSchema.optional(),
+});
+
 const OrchestratorConfigSchema = z.object({
   port: z.number().default(3000),
   terminalPort: z.number().optional(),
@@ -228,6 +246,7 @@ const OrchestratorConfigSchema = z.object({
   }),
   reactions: z.record(ReactionConfigSchema).default({}),
   progressChecks: ProgressChecksSchema.default({}),
+  accounts: z.record(AccountConfigSchema).optional(),
 });
 
 // =============================================================================

@@ -186,6 +186,22 @@ export function parseTmuxName(tmuxName: string): {
 }
 
 /**
+ * Get the per-account capacity data directory.
+ * Format: ~/.syntese/accounts/<accountId>
+ */
+export function getAccountDataDir(accountId: string): string {
+  return join(getDataRootDir(), "accounts", accountId);
+}
+
+/**
+ * Get the capacity state file path for an account.
+ * Format: ~/.syntese/accounts/<accountId>/capacity.json
+ */
+export function getAccountCapacityFile(accountId: string): string {
+  return join(getAccountDataDir(accountId), "capacity.json");
+}
+
+/**
  * Expand ~ to home directory.
  */
 export function expandHome(filepath: string): string {

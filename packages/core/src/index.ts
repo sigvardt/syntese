@@ -154,6 +154,8 @@ export {
   parseTmuxName,
   expandHome,
   validateAndStoreOrigin,
+  getAccountDataDir,
+  getAccountCapacityFile,
 } from "./paths.js";
 
 // Config generator — auto-generate config from repo URL
