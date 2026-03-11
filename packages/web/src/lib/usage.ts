@@ -1,5 +1,5 @@
 import {
-  getSessionsDir,
+  getProjectBaseDir,
   type Agent,
   type CostEstimate,
   type OrchestratorConfig,
@@ -284,7 +284,7 @@ function parseUsageCache(raw: string): UsageCacheFile | null {
 }
 
 function getUsageCachePath(config: OrchestratorConfig, projectPath: string): string {
-  return join(getSessionsDir(config.configPath, projectPath), USAGE_CACHE_FILE_NAME);
+  return join(getProjectBaseDir(config.configPath, projectPath), USAGE_CACHE_FILE_NAME);
 }
 
 async function readProjectUsageCache(

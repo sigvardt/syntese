@@ -638,6 +638,9 @@ export function createSessionManager(deps: SessionManagerDeps): OpenCodeSessionM
       const files = readdirSync(sessionsDir);
       for (const file of files) {
         if (file === "archive" || file.startsWith(".")) continue;
+        // Skip files with non-session names (e.g. usage-cache.json) to avoid
+        // passing them to readMetadataRaw which enforces the session ID format.
+        if (!/^[a-zA-Z0-9_-]+$/.test(file)) continue;
         const fullPath = join(sessionsDir, file);
         try {
           if (statSync(fullPath).isFile()) {
