@@ -43,6 +43,13 @@ const PROVIDER_META: Record<
   },
 };
 
+const TWO_LINE_CLAMP_STYLE = {
+  display: "-webkit-box",
+  WebkitBoxOrient: "vertical",
+  WebkitLineClamp: 2,
+  overflow: "hidden",
+} as const;
+
 function formatResetTime(resetsAt: string | null | undefined): string | null {
   if (!resetsAt) return null;
 
@@ -107,10 +114,10 @@ function progressForDial(dial: UsageDial): number | null {
   return Math.min(100, Math.max(0, (dial.value / maxValue) * 100));
 }
 
-function valueClassName(displayValue: string): string {
-  if (displayValue.length >= 9) return "text-[11px]";
-  if (displayValue.length >= 6) return "text-[14px]";
-  return "text-[18px]";
+function valueClassName(displayValue: string, compact: boolean): string {
+  if (displayValue.length >= 9) return compact ? "text-[9px]" : "text-[10px]";
+  if (displayValue.length >= 6) return compact ? "text-[11px]" : "text-[13px]";
+  return compact ? "text-[14px]" : "text-[16px]";
 }
 
 function CircularUsageDial({
@@ -126,8 +133,8 @@ function CircularUsageDial({
   source?: DashboardUsageSource;
   capturedAt?: string | null;
 }) {
-  const size = compact ? 104 : 116;
-  const strokeWidth = compact ? 8 : 9;
+  const size = compact ? 84 : 92;
+  const strokeWidth = compact ? 6 : 7;
   const radius = (size - strokeWidth) / 2;
   const circumference = 2 * Math.PI * radius;
   const progress = progressForDial(dial);
@@ -153,8 +160,8 @@ function CircularUsageDial({
   return (
     <div
       className={cn(
-        "rounded-[14px] border border-[var(--color-border-subtle)] bg-[rgba(255,255,255,0.02)] px-3 py-3",
-        compact ? "min-w-[150px]" : "min-w-[168px]",
+        "flex h-full flex-col rounded-[12px] border border-[var(--color-border-subtle)] bg-[rgba(255,255,255,0.02)] px-2.5",
+        compact ? "py-2" : "py-2.5",
       )}
     >
       <div className="flex items-center justify-center">
@@ -201,24 +208,33 @@ function CircularUsageDial({
             <div
               className={cn(
                 "font-[var(--font-mono)] font-semibold tabular-nums text-[var(--color-text-primary)]",
-                valueClassName(dial.displayValue),
+                valueClassName(dial.displayValue, compact),
               )}
             >
               {dial.status === "unlimited" ? "∞" : dial.displayValue}
             </div>
             {dial.status === "unlimited" && (
-              <div className="mt-0.5 text-[9px] uppercase tracking-[0.12em] text-[var(--color-text-tertiary)]">
+              <div className="mt-0.5 text-[8px] uppercase tracking-[0.12em] text-[var(--color-text-tertiary)]">
                 unlimited
               </div>
             )}
           </div>
         </div>
       </div>
-      <div className="mt-2 space-y-1 text-center">
-        <div className="text-[11px] font-medium leading-snug text-[var(--color-text-secondary)]">
+      <div className="mt-1.5 flex-1 space-y-0.5 text-center">
+        <div
+          className="min-h-[2.5rem] text-[10px] font-medium leading-tight text-[var(--color-text-secondary)]"
+          style={TWO_LINE_CLAMP_STYLE}
+          title={dial.label}
+        >
           {dial.label}
         </div>
-        <div className="text-[10px] text-[var(--color-text-tertiary)]">{helperText}</div>
+        <div
+          className="truncate text-[9px] leading-tight text-[var(--color-text-tertiary)]"
+          title={helperText}
+        >
+          {helperText}
+        </div>
       </div>
     </div>
   );
@@ -244,7 +260,7 @@ function UsageProviderSection({
         boxShadow: `0 14px 32px rgba(0,0,0,0.18), inset 0 1px 0 rgba(255,255,255,0.04)`,
       }}
     >
-      <div className="border-b border-[var(--color-border-subtle)] px-4 py-3">
+      <div className="border-b border-[var(--color-border-subtle)] px-3.5 py-2.5">
         <div className="flex flex-wrap items-start justify-between gap-2">
           <div>
             <div className="flex items-center gap-2">
@@ -288,10 +304,10 @@ function UsageProviderSection({
       </div>
       <div
         className={cn(
-          "grid gap-3 p-4",
+          "grid gap-2.5 p-3",
           compact
-            ? "grid-cols-1 sm:grid-cols-2 xl:grid-cols-4"
-            : "grid-cols-1 sm:grid-cols-2 xl:grid-cols-3",
+            ? "grid-cols-2 md:grid-cols-3 xl:grid-cols-4"
+            : "grid-cols-2 sm:grid-cols-3 xl:grid-cols-6",
         )}
       >
         {snapshot.dials.map((dial) => (
