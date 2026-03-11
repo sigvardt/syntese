@@ -291,14 +291,6 @@ export function Dashboard({
           {globalPause.sourceSessionId ? ` Source: ${globalPause.sourceSessionId}.` : ""}
         </div>
       )}
-      <UsageOverview />
-      {globalPause && (
-        <div className="mb-6 rounded border border-[rgba(239,68,68,0.3)] bg-[rgba(239,68,68,0.07)] px-3.5 py-2.5 text-[11px] text-[var(--color-status-attention)]">
-          <span className="font-semibold">Orchestrator paused:</span> {globalPause.reason}. Resume
-          after {new Date(globalPause.pausedUntil).toLocaleString()}.
-          {globalPause.sourceSessionId ? ` Source: ${globalPause.sourceSessionId}.` : ""}
-        </div>
-      )}
 
       {/* Rate limit notice */}
       {anyRateLimited && !rateLimitDismissed && (

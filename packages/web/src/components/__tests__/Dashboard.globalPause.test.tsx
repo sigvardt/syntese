@@ -4,6 +4,25 @@ import { Dashboard } from "@/components/Dashboard";
 import type { GlobalPauseState } from "@/lib/types";
 import { makeSession } from "@/__tests__/helpers";
 
+function getRequestUrl(input: RequestInfo | URL): string {
+  if (typeof input === "string") {
+    return input;
+  }
+
+  if (input instanceof URL) {
+    return input.pathname;
+  }
+
+  return input.url;
+}
+
+function makeJsonResponse(body: unknown): Response {
+  return {
+    ok: true,
+    json: async () => body,
+  } as Response;
+}
+
 describe("Dashboard globalPause banner", () => {
   let eventSourceMock: {
     onmessage: ((event: MessageEvent) => void) | null;
@@ -25,6 +44,26 @@ describe("Dashboard globalPause banner", () => {
     ...overrides,
   });
 
+  async function renderDashboard({
+    initialSessions,
+    stats,
+    initialGlobalPause,
+  }: {
+    initialSessions: Parameters<typeof Dashboard>[0]["initialSessions"];
+    stats: Parameters<typeof Dashboard>[0]["stats"];
+    initialGlobalPause: Parameters<typeof Dashboard>[0]["initialGlobalPause"];
+  }) {
+    await act(async () => {
+      render(
+        <Dashboard
+          initialSessions={initialSessions}
+          stats={stats}
+          initialGlobalPause={initialGlobalPause}
+        />,
+      );
+    });
+  }
+
   beforeEach(() => {
     eventSourceMock = {
       onmessage: null,
@@ -32,63 +71,87 @@ describe("Dashboard globalPause banner", () => {
       close: vi.fn(),
     };
     global.EventSource = vi.fn(() => eventSourceMock as unknown as EventSource);
-    global.fetch = vi.fn();
+    global.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = getRequestUrl(input);
+
+      if (url === "/api/usage") {
+        return makeJsonResponse({ snapshots: [] });
+      }
+
+      if (url === "/api/sessions") {
+        return makeJsonResponse({ sessions: [], globalPause: null });
+      }
+
+      throw new Error(`Unexpected fetch request in test: ${url}`);
+    }) as typeof fetch;
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
   });
 
-  it("shows banner when initialGlobalPause is set", () => {
+  it("shows banner when initialGlobalPause is set", async () => {
     const sessions = [makeSession()];
     const globalPause = makeGlobalPause();
 
-    render(
-      <Dashboard
-        initialSessions={sessions}
-        stats={defaultStats}
-        initialGlobalPause={globalPause}
-      />,
-    );
+    await renderDashboard({
+      initialSessions: sessions,
+      stats: defaultStats,
+      initialGlobalPause: globalPause,
+    });
 
     expect(screen.getByText(/Orchestrator paused:/)).toBeInTheDocument();
     expect(screen.getByText(/Model rate limit reached/)).toBeInTheDocument();
   });
 
-  it("hides banner when initialGlobalPause is null", () => {
+  it("hides banner when initialGlobalPause is null", async () => {
     const sessions = [makeSession()];
 
-    render(<Dashboard initialSessions={sessions} stats={defaultStats} initialGlobalPause={null} />);
+    await renderDashboard({
+      initialSessions: sessions,
+      stats: defaultStats,
+      initialGlobalPause: null,
+    });
 
     expect(screen.queryByText(/Orchestrator paused:/)).not.toBeInTheDocument();
   });
 
-  it("shows banner with custom reason from any provider", () => {
+  it("shows banner with custom reason from any provider", async () => {
     const sessions = [makeSession()];
     const globalPause = makeGlobalPause({ reason: "Custom provider limit exceeded" });
 
-    render(
-      <Dashboard
-        initialSessions={sessions}
-        stats={defaultStats}
-        initialGlobalPause={globalPause}
-      />,
-    );
+    await renderDashboard({
+      initialSessions: sessions,
+      stats: defaultStats,
+      initialGlobalPause: globalPause,
+    });
 
     expect(screen.getByText(/Custom provider limit exceeded/)).toBeInTheDocument();
   });
 
-  it("displays source session ID when provided", () => {
+  it("renders the usage section and pause banner only once", async () => {
+    const sessions = [makeSession()];
+    const globalPause = makeGlobalPause();
+
+    await renderDashboard({
+      initialSessions: sessions,
+      stats: defaultStats,
+      initialGlobalPause: globalPause,
+    });
+
+    expect(screen.getAllByText("Subscription Usage")).toHaveLength(1);
+    expect(screen.getAllByText(/Orchestrator paused:/)).toHaveLength(1);
+  });
+
+  it("displays source session ID when provided", async () => {
     const sessions = [makeSession()];
     const globalPause = makeGlobalPause({ sourceSessionId: "my-worker-42" });
 
-    render(
-      <Dashboard
-        initialSessions={sessions}
-        stats={defaultStats}
-        initialGlobalPause={globalPause}
-      />,
-    );
+    await renderDashboard({
+      initialSessions: sessions,
+      stats: defaultStats,
+      initialGlobalPause: globalPause,
+    });
 
     expect(screen.getByText(/Source: my-worker-42/)).toBeInTheDocument();
   });
@@ -96,13 +159,22 @@ describe("Dashboard globalPause banner", () => {
   it("banner appears from state update via SSE (provider-agnostic)", async () => {
     const sessions = [makeSession()];
 
-    vi.mocked(fetch).mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({
-        sessions: [...sessions, makeSession({ id: "session-new" })],
-        globalPause: makeGlobalPause({ reason: "Rate limit from any agent" }),
-      }),
-    } as Response);
+    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL) => {
+      const url = getRequestUrl(input);
+
+      if (url === "/api/usage") {
+        return makeJsonResponse({ snapshots: [] });
+      }
+
+      if (url === "/api/sessions") {
+        return makeJsonResponse({
+          sessions: [...sessions, makeSession({ id: "session-new" })],
+          globalPause: makeGlobalPause({ reason: "Rate limit from any agent" }),
+        });
+      }
+
+      throw new Error(`Unexpected fetch request in test: ${url}`);
+    });
 
     render(<Dashboard initialSessions={sessions} stats={defaultStats} initialGlobalPause={null} />);
 
@@ -142,13 +214,22 @@ describe("Dashboard globalPause banner", () => {
     const sessions = [makeSession()];
     const globalPause = makeGlobalPause();
 
-    vi.mocked(fetch).mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({
-        sessions: [...sessions, makeSession({ id: "session-new" })],
-        globalPause: null,
-      }),
-    } as Response);
+    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL) => {
+      const url = getRequestUrl(input);
+
+      if (url === "/api/usage") {
+        return makeJsonResponse({ snapshots: [] });
+      }
+
+      if (url === "/api/sessions") {
+        return makeJsonResponse({
+          sessions: [...sessions, makeSession({ id: "session-new" })],
+          globalPause: null,
+        });
+      }
+
+      throw new Error(`Unexpected fetch request in test: ${url}`);
+    });
 
     render(
       <Dashboard
