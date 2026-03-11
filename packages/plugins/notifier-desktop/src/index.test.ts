@@ -117,12 +117,12 @@ describe("notifier-desktop", () => {
       expect(script).toContain("URGENT");
     });
 
-    it("uses 'Agent Orchestrator' prefix for non-urgent priority", async () => {
+    it("uses 'Syntese' prefix for non-urgent priority", async () => {
       const notifier = create();
       await notifier.notify(makeEvent({ priority: "action" }));
 
       const script = mockExecFile.mock.calls[0][1][1] as string;
-      expect(script).toContain("Agent Orchestrator");
+      expect(script).toContain("Syntese");
     });
 
     it("includes sound for urgent notifications", async () => {

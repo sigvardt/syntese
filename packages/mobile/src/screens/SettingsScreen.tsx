@@ -188,7 +188,7 @@ export default function SettingsScreen({ navigation }: Props) {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Backend URL</Text>
           <Text style={styles.hint}>
-            Enter the URL where your AO dashboard is running.
+            Enter the URL where your Syntese dashboard is running.
           </Text>
           <Text style={styles.fieldLabel}>Dashboard API URL</Text>
           <TextInput

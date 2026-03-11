@@ -19,10 +19,12 @@ const ibmPlexMono = IBM_Plex_Mono({
 
 export async function generateMetadata(): Promise<Metadata> {
   const projectName = getProjectName();
+  const defaultTitle =
+    projectName === "Syntese" ? "Syntese" : `Syntese | ${projectName}`;
   return {
     title: {
       template: `%s | ${projectName}`,
-      default: `ao | ${projectName}`,
+      default: defaultTitle,
     },
     description: "Dashboard for managing parallel AI coding agents",
   };

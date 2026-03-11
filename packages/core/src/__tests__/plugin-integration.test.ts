@@ -113,7 +113,7 @@ beforeEach(() => {
   mkdirSync(tmpDir, { recursive: true });
 
   // Create a temporary config file
-  configPath = join(tmpDir, "agent-orchestrator.yaml");
+  configPath = join(tmpDir, "syntese.yaml");
   writeFileSync(configPath, "projects: {}\n");
 
   // Initialize project with tmpDir-based path

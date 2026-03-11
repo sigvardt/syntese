@@ -45,7 +45,7 @@ describe("Hash Generation", () => {
   });
 
   it("produces 12-character hex string", () => {
-    const configPath = join(tmpDir, "agent-orchestrator.yaml");
+    const configPath = join(tmpDir, "syntese.yaml");
     writeFileSync(configPath, "projects: {}");
 
     const hash = generateConfigHash(configPath);
@@ -55,7 +55,7 @@ describe("Hash Generation", () => {
   });
 
   it("is deterministic - same path produces same hash", () => {
-    const configPath = join(tmpDir, "agent-orchestrator.yaml");
+    const configPath = join(tmpDir, "syntese.yaml");
     writeFileSync(configPath, "projects: {}");
 
     const hash1 = generateConfigHash(configPath);
@@ -70,8 +70,8 @@ describe("Hash Generation", () => {
     mkdirSync(dir1, { recursive: true });
     mkdirSync(dir2, { recursive: true });
 
-    const config1 = join(dir1, "agent-orchestrator.yaml");
-    const config2 = join(dir2, "agent-orchestrator.yaml");
+    const config1 = join(dir1, "syntese.yaml");
+    const config2 = join(dir2, "syntese.yaml");
     writeFileSync(config1, "projects: {}");
     writeFileSync(config2, "projects: {}");
 
@@ -86,12 +86,12 @@ describe("Hash Generation", () => {
     const symlinkDir = join(tmpDir, "symlink");
     mkdirSync(realDir, { recursive: true });
 
-    const realConfig = join(realDir, "agent-orchestrator.yaml");
+    const realConfig = join(realDir, "syntese.yaml");
     writeFileSync(realConfig, "projects: {}");
 
     // Create symlink to directory
     symlinkSync(realDir, symlinkDir);
-    const symlinkConfig = join(symlinkDir, "agent-orchestrator.yaml");
+    const symlinkConfig = join(symlinkDir, "syntese.yaml");
 
     const hashReal = generateConfigHash(realConfig);
     const hashSymlink = generateConfigHash(symlinkConfig);
@@ -128,7 +128,7 @@ describe("Instance ID Generation", () => {
 
   beforeEach(() => {
     tmpDir = mkdtempSync(join(tmpdir(), "instance-test-"));
-    configPath = join(tmpDir, "agent-orchestrator.yaml");
+    configPath = join(tmpDir, "syntese.yaml");
     writeFileSync(configPath, "projects: {}");
   });
 
@@ -166,7 +166,7 @@ describe("Instance ID Generation", () => {
   it("different config + same project = different instance IDs", () => {
     const otherDir = join(tmpdir(), "other-config-test");
     mkdirSync(otherDir, { recursive: true });
-    const config2Path = join(otherDir, "agent-orchestrator.yaml");
+    const config2Path = join(otherDir, "syntese.yaml");
     writeFileSync(config2Path, "projects: {}");
 
     const id1 = generateInstanceId(configPath, "/repos/integrator");
@@ -203,7 +203,7 @@ describe("Session Prefix Generation", () => {
 
   describe("kebab-case", () => {
     it("uses initials", () => {
-      expect(generateSessionPrefix("agent-orchestrator")).toBe("ao");
+      expect(generateSessionPrefix("syntese-platform")).toBe("sp");
       expect(generateSessionPrefix("my-app")).toBe("ma");
       expect(generateSessionPrefix("safe-split")).toBe("ss");
     });
@@ -212,7 +212,7 @@ describe("Session Prefix Generation", () => {
   describe("snake_case", () => {
     it("uses initials", () => {
       expect(generateSessionPrefix("my_project")).toBe("mp");
-      expect(generateSessionPrefix("agent_orchestrator")).toBe("ao");
+      expect(generateSessionPrefix("syntese_platform")).toBe("sp");
     });
   });
 
@@ -221,6 +221,7 @@ describe("Session Prefix Generation", () => {
       expect(generateSessionPrefix("integrator")).toBe("int");
       expect(generateSessionPrefix("backend")).toBe("bac");
       expect(generateSessionPrefix("frontend")).toBe("fro");
+      expect(generateSessionPrefix("syntese")).toBe("syn");
     });
   });
 
@@ -241,12 +242,13 @@ describe("Session Prefix Generation", () => {
 });
 
 describe("Path Construction", () => {
+  const projectBaseDirPattern = String.raw`(?:\.agent-orchestrator|\.syntese)\/[a-f0-9]{12}-integrator`;
   let tmpDir: string;
   let configPath: string;
 
   beforeEach(() => {
     tmpDir = mkdtempSync(join(tmpdir(), "path-construct-"));
-    configPath = join(tmpDir, "agent-orchestrator.yaml");
+    configPath = join(tmpDir, "syntese.yaml");
     writeFileSync(configPath, "projects: {}");
   });
 
@@ -257,37 +259,37 @@ describe("Path Construction", () => {
   it("getProjectBaseDir returns correct format", () => {
     const baseDir = getProjectBaseDir(configPath, "/repos/integrator");
 
-    expect(baseDir).toMatch(/^.*\/.agent-orchestrator\/[a-f0-9]{12}-integrator$/);
+    expect(baseDir).toMatch(new RegExp(`^.*\\/${projectBaseDirPattern}$`));
   });
 
   it("getSessionsDir returns {baseDir}/sessions", () => {
     const sessionsDir = getSessionsDir(configPath, "/repos/integrator");
 
-    expect(sessionsDir).toMatch(/\.agent-orchestrator\/[a-f0-9]{12}-integrator\/sessions$/);
+    expect(sessionsDir).toMatch(new RegExp(`${projectBaseDirPattern}\\/sessions$`));
   });
 
   it("getWorktreesDir returns {baseDir}/worktrees", () => {
     const worktreesDir = getWorktreesDir(configPath, "/repos/integrator");
 
-    expect(worktreesDir).toMatch(/\.agent-orchestrator\/[a-f0-9]{12}-integrator\/worktrees$/);
+    expect(worktreesDir).toMatch(new RegExp(`${projectBaseDirPattern}\\/worktrees$`));
   });
 
   it("getFeedbackReportsDir returns {baseDir}/feedback-reports", () => {
     const reportsDir = getFeedbackReportsDir(configPath, "/repos/integrator");
 
-    expect(reportsDir).toMatch(/\.agent-orchestrator\/[a-f0-9]{12}-integrator\/feedback-reports$/);
+    expect(reportsDir).toMatch(new RegExp(`${projectBaseDirPattern}\\/feedback-reports$`));
   });
 
   it("getArchiveDir returns {baseDir}/sessions/archive", () => {
     const archiveDir = getArchiveDir(configPath, "/repos/integrator");
 
-    expect(archiveDir).toMatch(/\.agent-orchestrator\/[a-f0-9]{12}-integrator\/sessions\/archive$/);
+    expect(archiveDir).toMatch(new RegExp(`${projectBaseDirPattern}\\/sessions\\/archive$`));
   });
 
   it("getOriginFilePath returns {baseDir}/.origin", () => {
     const originPath = getOriginFilePath(configPath, "/repos/integrator");
 
-    expect(originPath).toMatch(/\.agent-orchestrator\/[a-f0-9]{12}-integrator\/\.origin$/);
+    expect(originPath).toMatch(new RegExp(`${projectBaseDirPattern}\\/\\.origin$`));
   });
 
   it("all paths share the same base directory", () => {
@@ -342,7 +344,7 @@ describe("Tmux Naming", () => {
 
   beforeEach(() => {
     tmpDir = mkdtempSync(join(tmpdir(), "tmux-naming-"));
-    configPath = join(tmpDir, "agent-orchestrator.yaml");
+    configPath = join(tmpDir, "syntese.yaml");
     writeFileSync(configPath, "projects: {}");
   });
 
@@ -416,7 +418,7 @@ describe("Origin File Management", () => {
 
   beforeEach(() => {
     tmpDir = mkdtempSync(join(tmpdir(), "origin-test-"));
-    configPath = join(tmpDir, "agent-orchestrator.yaml");
+    configPath = join(tmpDir, "syntese.yaml");
     projectPath = join(tmpDir, "project");
     writeFileSync(configPath, "projects: {}");
     mkdtempSync(projectPath);

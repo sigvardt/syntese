@@ -72,7 +72,7 @@ describe("services", () => {
     mockCreateSessionManager.mockReset();
     mockLoadConfig.mockReset();
     mockLoadConfig.mockReturnValue({
-      configPath: "/tmp/agent-orchestrator.yaml",
+      configPath: "/tmp/syntese.yaml",
       port: 3000,
       readyThresholdMs: 300_000,
       defaults: { runtime: "tmux", agent: "claude-code", workspace: "worktree", notifiers: [] },
@@ -125,7 +125,7 @@ describe("pollBacklog", () => {
     mockSpawn.mockClear();
 
     mockLoadConfig.mockReturnValue({
-      configPath: "/tmp/agent-orchestrator.yaml",
+      configPath: "/tmp/syntese.yaml",
       port: 3000,
       readyThresholdMs: 300_000,
       defaults: { runtime: "tmux", agent: "claude-code", workspace: "worktree", notifiers: [] },
@@ -195,7 +195,7 @@ describe("pollBacklog", () => {
       {
         labels: ["agent:in-progress"],
         removeLabels: ["agent:backlog"],
-        comment: "Claimed by agent orchestrator — session spawned.",
+        comment: "Claimed by Syntese — session spawned.",
       },
       expect.objectContaining({ tracker: { plugin: "github" } }),
     );

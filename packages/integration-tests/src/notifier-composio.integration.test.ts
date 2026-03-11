@@ -81,7 +81,7 @@ describe("notifier-composio integration", () => {
           action: "GMAIL_SEND_EMAIL",
           params: expect.objectContaining({
             to: "admin@example.com",
-            subject: "Agent Orchestrator Notification",
+            subject: "Syntese Notification",
           }),
         }),
       );

@@ -115,7 +115,7 @@ describe("getDashboardUsage", () => {
     await mkdir(appPath, { recursive: true });
     await mkdir(docsPath, { recursive: true });
 
-    configPath = join(configDir, "agent-orchestrator.yaml");
+    configPath = join(configDir, "syntese.yaml");
     await writeFile(configPath, "projects: {}\n", "utf-8");
 
     config = makeConfig(configPath, { app: appPath, docs: docsPath });

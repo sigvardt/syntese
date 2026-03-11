@@ -124,7 +124,7 @@ beforeEach(() => {
   mkdirSync(tmpDir, { recursive: true });
 
   // Create a temporary config file
-  configPath = join(tmpDir, "agent-orchestrator.yaml");
+  configPath = join(tmpDir, "syntese.yaml");
   writeFileSync(configPath, "projects: {}\n");
 
   mockRuntime = {
@@ -220,7 +220,7 @@ beforeEach(() => {
 
 afterEach(() => {
   process.env.PATH = originalPath;
-  // Clean up hash-based directories in ~/.agent-orchestrator
+  // Clean up hash-based directories in ~/.syntese
   const projectBaseDir = getProjectBaseDir(configPath, join(tmpDir, "my-app"));
   if (existsSync(projectBaseDir)) {
     rmSync(projectBaseDir, { recursive: true, force: true });

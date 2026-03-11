@@ -31,7 +31,7 @@ function shouldPlaySound(priority: EventPriority, soundEnabled: boolean): boolea
 }
 
 function formatTitle(event: OrchestratorEvent): string {
-  const prefix = event.priority === "urgent" ? "URGENT" : "Agent Orchestrator";
+  const prefix = event.priority === "urgent" ? "URGENT" : "Syntese";
   return `${prefix} [${event.sessionId}]`;
 }
 

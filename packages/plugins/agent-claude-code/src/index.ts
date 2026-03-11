@@ -47,7 +47,7 @@ function normalizePermissionMode(
 
 /** Hook script content that updates session metadata on git/gh commands */
 const METADATA_UPDATER_SCRIPT = `#!/usr/bin/env bash
-# Metadata Updater Hook for Agent Orchestrator
+# Metadata Updater Hook for Syntese
 #
 # This PostToolUse hook automatically updates session metadata when:
 # - gh pr create: extracts PR URL and writes to metadata

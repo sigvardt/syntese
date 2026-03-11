@@ -221,7 +221,7 @@ export function Dashboard({
       <div className="mb-6 flex items-center justify-between border-b border-[var(--color-border-subtle)] pb-5">
         <div className="flex items-center gap-6">
           <h1 className="text-[17px] font-semibold tracking-[-0.02em] text-[var(--color-text-primary)]">
-            {projectName ?? "Orchestrator"}
+            {projectName ?? "Syntese"}
           </h1>
           <StatusLine stats={liveStats} needsAttention={needsAttention} />
         </div>

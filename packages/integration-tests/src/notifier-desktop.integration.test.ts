@@ -117,7 +117,7 @@ describe("notifier-desktop integration", () => {
 
       expect(mockExecFile.mock.calls[0][0]).toBe("notify-send");
       const args = mockExecFile.mock.calls[0][1] as string[];
-      expect(args).toContain("Agent Orchestrator [backend-1]");
+      expect(args).toContain("Syntese [backend-1]");
       expect(args).toContain("Test msg");
     });
 
