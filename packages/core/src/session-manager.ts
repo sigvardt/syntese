@@ -35,6 +35,7 @@ import {
   type ProjectConfig,
   type SessionKillOptions,
   type SessionKillStepResult,
+  type AccountConfig,
   type Runtime,
   type Agent,
   type Workspace,
@@ -164,9 +165,14 @@ async function runAccountStatusCommand(
 }
 
 /** Check whether account auth is currently valid for spawn-time routing. */
-async function isAccountAuthValid(accountId: string, account: { agent: string }): Promise<boolean> {
+async function isAccountAuthValid(accountId: string, account: AccountConfig): Promise<boolean> {
   const command = getAccountStatusCommand(account);
   if (!command) {
+    return true;
+  }
+
+  const isImplicitAccount = Object.keys(account).length === 1 && "agent" in account;
+  if (isImplicitAccount) {
     return true;
   }
 
