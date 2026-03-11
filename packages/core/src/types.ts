@@ -1029,6 +1029,70 @@ export interface OrchestratorConfig {
 
   /** Periodic per-session progress snapshots */
   progressChecks: ProgressChecksConfig;
+
+  /** Per-account capacity configuration (optional; backward compatible) */
+  accounts?: Record<string, AccountConfig>;
+}
+
+// =============================================================================
+// ACCOUNT CAPACITY
+// =============================================================================
+
+/** Account subscription/auth configuration */
+export interface AccountConfig {
+  /** Agent type this account belongs to */
+  agent: string;
+  /** Model identifier, e.g. "claude-opus-4" */
+  model?: string;
+  /** Base quota limits for the rolling window */
+  baseQuota?: {
+    /** Estimated total messages per window (e.g. 223 for Codex Pro) */
+    estimatedTotal: number;
+    /** Window duration in hours (default: 5) */
+    windowHours?: number;
+  };
+  /** Overage / spend-cap configuration */
+  overage?: {
+    enabled: boolean;
+    type?: "credits" | "api-rates";
+    /** Maximum spend cap in dollars or credits */
+    spendCap?: number;
+  };
+}
+
+/** Real-time headroom status for a single account */
+export type AccountCapacityStatus =
+  | "available"
+  | "quota-exhausted"
+  | "overage-only"
+  | "fully-exhausted";
+
+export interface AccountBaseQuota {
+  estimatedTotal: number;
+  consumed: number;
+  remaining: number;
+  percentRemaining: number;
+  /** Human-readable time until window reset, e.g. "2h 15m" */
+  windowResetIn: string | null;
+}
+
+export interface AccountOverage {
+  enabled: boolean;
+  type: "credits" | "api-rates";
+  consumed: number;
+  spendCap: number;
+  remaining: number;
+}
+
+/** Computed real-time capacity for a single account */
+export interface AccountCapacity {
+  accountId: string;
+  agent: string;
+  model: string | null;
+  baseQuota: AccountBaseQuota;
+  overage: AccountOverage | null;
+  activeSessions: number;
+  status: AccountCapacityStatus;
 }
 
 export interface DefaultPlugins {
