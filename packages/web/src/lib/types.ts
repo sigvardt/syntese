@@ -162,6 +162,80 @@ export interface SessionUsageResponse {
   snapshot: UsageSnapshot | null;
 }
 
+export type GitHubVitalsCIStatus = "passing" | "failing" | "pending" | "unknown";
+
+export type VitalsCorrelationReason = "pr_number" | "issue_number" | "branch" | "session_id";
+
+export interface VitalsSessionCorrelation {
+  sessionId: string;
+  projectId: string;
+  reason: VitalsCorrelationReason;
+}
+
+export interface GitHubVitalsIssue {
+  id: number;
+  number: number;
+  title: string;
+  url: string;
+  state: "open" | "closed";
+  labels: string[];
+  owner: string;
+  repo: string;
+  updatedAt: string;
+  createdAt: string;
+  correlations: VitalsSessionCorrelation[];
+}
+
+export interface GitHubVitalsPullRequest {
+  id: number;
+  number: number;
+  title: string;
+  url: string;
+  state: "open" | "closed" | "merged";
+  labels: string[];
+  owner: string;
+  repo: string;
+  branch: string;
+  sha: string;
+  updatedAt: string;
+  createdAt: string;
+  ciStatus: GitHubVitalsCIStatus;
+  correlations: VitalsSessionCorrelation[];
+}
+
+export interface GitHubVitalsCommit {
+  sha: string;
+  shortSha: string;
+  message: string;
+  url: string;
+  author: string;
+  pushedAt: string;
+  owner: string;
+  repo: string;
+}
+
+export interface GitHubVitalsRecency {
+  lastIssueClosedAt: string | null;
+  lastPRMergedAt: string | null;
+  lastCommitPushedAt: string | null;
+}
+
+export interface GitHubProjectVitals {
+  projectId: string;
+  repository: string;
+  issues: GitHubVitalsIssue[];
+  prs: GitHubVitalsPullRequest[];
+  commits: GitHubVitalsCommit[];
+  recency: GitHubVitalsRecency;
+  degraded: boolean;
+  error?: string;
+}
+
+export interface GitHubVitalsResponse {
+  projects: GitHubProjectVitals[];
+  fetchedAt: string;
+}
+
 /** SSE snapshot event from /api/events */
 export interface SSESnapshotEvent {
   type: "snapshot";
