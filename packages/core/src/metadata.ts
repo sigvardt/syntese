@@ -113,6 +113,12 @@ export function readMetadata(dataDir: string, sessionId: SessionId): SessionMeta
       ? Number(raw["directTerminalWsPort"])
       : undefined,
     opencodeSessionId: raw["opencodeSessionId"],
+    progressCheckpointResetAt: raw["progressCheckpointResetAt"],
+    progressCheckpointMissCount: raw["progressCheckpointMissCount"],
+    progressCheckpointFirstCommitFiredAt: raw["progressCheckpointFirstCommitFiredAt"],
+    progressCheckpointFirstPRFiredAt: raw["progressCheckpointFirstPRFiredAt"],
+    noCommitWindowStartedAt: raw["noCommitWindowStartedAt"],
+    noCommitSatisfiedAt: raw["noCommitSatisfiedAt"],
   };
 }
 
@@ -182,6 +188,17 @@ export function writeMetadata(
   if (metadata.directTerminalWsPort !== undefined)
     data["directTerminalWsPort"] = String(metadata.directTerminalWsPort);
   if (metadata.opencodeSessionId) data["opencodeSessionId"] = metadata.opencodeSessionId;
+  if (metadata.progressCheckpointResetAt)
+    data["progressCheckpointResetAt"] = metadata.progressCheckpointResetAt;
+  if (metadata.progressCheckpointMissCount)
+    data["progressCheckpointMissCount"] = metadata.progressCheckpointMissCount;
+  if (metadata.progressCheckpointFirstCommitFiredAt)
+    data["progressCheckpointFirstCommitFiredAt"] = metadata.progressCheckpointFirstCommitFiredAt;
+  if (metadata.progressCheckpointFirstPRFiredAt)
+    data["progressCheckpointFirstPRFiredAt"] = metadata.progressCheckpointFirstPRFiredAt;
+  if (metadata.noCommitWindowStartedAt)
+    data["noCommitWindowStartedAt"] = metadata.noCommitWindowStartedAt;
+  if (metadata.noCommitSatisfiedAt) data["noCommitSatisfiedAt"] = metadata.noCommitSatisfiedAt;
 
   atomicWriteFileSync(path, serializeMetadata(data));
 }

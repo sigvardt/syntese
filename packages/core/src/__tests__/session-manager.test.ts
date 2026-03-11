@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { chmodSync, mkdirSync, readFileSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { execFileSync, spawn } from "node:child_process";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { homedir, tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
 import { createSessionManager } from "../session-manager.js";
@@ -44,6 +44,14 @@ function makeHandle(id: string): RuntimeHandle {
 
 function runGit(cwd: string, ...args: string[]): string {
   return execFileSync("git", args, { cwd, encoding: "utf-8" }).trim();
+}
+
+function runGitWithEnv(cwd: string, env: Record<string, string>, ...args: string[]): string {
+  return execFileSync("git", args, {
+    cwd,
+    encoding: "utf-8",
+    env: { ...process.env, ...env },
+  }).trim();
 }
 
 function formatErrorMessage(err: unknown): string {
@@ -116,6 +124,54 @@ function installMockOpencodeWithNotFoundDelete(sessionListJson: string): string 
   );
   chmodSync(scriptPath, 0o755);
   return binDir;
+}
+
+function createRepoWithPushedFeatureCommit(
+  repoPath: string,
+  featureBranch: string,
+  initialCommitAt: string,
+  featureCommitAt: string,
+): string {
+  const remotePath = join(tmpDir, `${basename(repoPath)}-remote.git`);
+  mkdirSync(remotePath, { recursive: true });
+  runGit(remotePath, "init", "--bare");
+
+  mkdirSync(repoPath, { recursive: true });
+  runGit(repoPath, "init", "-b", "main");
+  runGit(repoPath, "config", "user.email", "ao@example.com");
+  runGit(repoPath, "config", "user.name", "AO Test");
+  runGit(repoPath, "remote", "add", "origin", remotePath);
+
+  writeFileSync(join(repoPath, "README.md"), "# test\n");
+  runGit(repoPath, "add", "README.md");
+  runGitWithEnv(
+    repoPath,
+    {
+      GIT_AUTHOR_DATE: initialCommitAt,
+      GIT_COMMITTER_DATE: initialCommitAt,
+    },
+    "commit",
+    "-m",
+    "init",
+  );
+
+  runGit(repoPath, "checkout", "-b", featureBranch);
+  writeFileSync(join(repoPath, "feature.txt"), "visible progress\n");
+  runGit(repoPath, "add", "feature.txt");
+  runGitWithEnv(
+    repoPath,
+    {
+      GIT_AUTHOR_DATE: featureCommitAt,
+      GIT_COMMITTER_DATE: featureCommitAt,
+    },
+    "commit",
+    "-m",
+    "feat: add visible progress",
+  );
+  runGit(repoPath, "push", "-u", "origin", featureBranch);
+  runGit(repoPath, "fetch", "origin");
+
+  return repoPath;
 }
 
 beforeEach(() => {
@@ -2187,6 +2243,62 @@ describe("send", () => {
       "Wake up and handle the CI failures",
     );
     expect(readMetadataRaw(sessionsDir, "app-1")?.["status"]).toBe("working");
+  });
+
+  it("resets the no-commit window after a human send when nothing has been pushed yet", async () => {
+    const repoPath = join(tmpDir, "send-reset-no-commit-repo");
+    mkdirSync(repoPath, { recursive: true });
+    runGit(repoPath, "init", "-b", "main");
+    runGit(repoPath, "config", "user.email", "ao@example.com");
+    runGit(repoPath, "config", "user.name", "AO Test");
+    writeFileSync(join(repoPath, "README.md"), "# test\n");
+    runGit(repoPath, "add", "README.md");
+    runGit(repoPath, "commit", "-m", "init");
+    runGit(repoPath, "checkout", "-b", "feat/test");
+
+    writeMetadata(sessionsDir, "app-1", {
+      worktree: repoPath,
+      branch: "feat/test",
+      status: "working",
+      project: "my-app",
+      createdAt: "2026-03-09T12:00:00.000Z",
+      runtimeHandle: JSON.stringify(makeHandle("rt-1")),
+    });
+    vi.mocked(mockRuntime.getOutput).mockResolvedValueOnce("before").mockResolvedValueOnce("after");
+
+    const sm = createSessionManager({ config, registry: mockRegistry });
+    await sm.send("app-1", "Please push your first commit", { resetNoCommitTimeout: true });
+
+    const metadata = readMetadataRaw(sessionsDir, "app-1");
+    expect(metadata?.["status"]).toBe("working");
+    expect(metadata?.["noCommitWindowStartedAt"]).toBeDefined();
+    expect(metadata?.["noCommitSatisfiedAt"]).toBeUndefined();
+  });
+
+  it("preserves no-commit satisfaction after a human send when a pushed commit already exists", async () => {
+    const repoPath = createRepoWithPushedFeatureCommit(
+      join(tmpDir, "send-reset-pushed-commit-repo"),
+      "feat/test",
+      "2026-03-09T12:00:00Z",
+      "2026-03-09T12:15:00Z",
+    );
+
+    writeMetadata(sessionsDir, "app-1", {
+      worktree: repoPath,
+      branch: "feat/test",
+      status: "working",
+      project: "my-app",
+      createdAt: "2026-03-09T12:10:00.000Z",
+      runtimeHandle: JSON.stringify(makeHandle("rt-1")),
+    });
+    vi.mocked(mockRuntime.getOutput).mockResolvedValueOnce("before").mockResolvedValueOnce("after");
+
+    const sm = createSessionManager({ config, registry: mockRegistry });
+    await sm.send("app-1", "Please keep going", { resetNoCommitTimeout: true });
+
+    const metadata = readMetadataRaw(sessionsDir, "app-1");
+    expect(metadata?.["status"]).toBe("working");
+    expect(metadata?.["noCommitSatisfiedAt"]).toBeDefined();
   });
 
   it("prefers a live session over stale terminal metadata when sending", async () => {

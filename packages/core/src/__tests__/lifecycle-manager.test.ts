@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { execFileSync } from "node:child_process";
 import { mkdirSync, rmSync, writeFileSync, existsSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { createHash, randomUUID } from "node:crypto";
 import { createLifecycleManager } from "../lifecycle-manager.js";
@@ -83,6 +83,14 @@ function runGit(cwd: string, ...args: string[]): string {
   return execFileSync("git", args, { cwd, encoding: "utf-8" }).trim();
 }
 
+function runGitWithEnv(cwd: string, env: Record<string, string>, ...args: string[]): string {
+  return execFileSync("git", args, {
+    cwd,
+    encoding: "utf-8",
+    env: { ...process.env, ...env },
+  }).trim();
+}
+
 function writeRepoFile(repoPath: string, relativePath: string, content: string): void {
   mkdirSync(dirname(join(repoPath, relativePath)), { recursive: true });
   writeFileSync(join(repoPath, relativePath), content);
@@ -99,6 +107,54 @@ function createCommittedRepo(repoPath: string, files: Record<string, string> = {
   }
   runGit(repoPath, "add", ".");
   runGit(repoPath, "commit", "-m", "init");
+  return repoPath;
+}
+
+function createRepoWithPushedFeatureCommit(
+  repoPath: string,
+  featureBranch: string,
+  initialCommitAt: string,
+  featureCommitAt: string,
+): string {
+  const remotePath = join(tmpDir, `${basename(repoPath)}-remote.git`);
+  mkdirSync(remotePath, { recursive: true });
+  runGit(remotePath, "init", "--bare");
+
+  mkdirSync(repoPath, { recursive: true });
+  runGit(repoPath, "init", "-b", "main");
+  runGit(repoPath, "config", "user.email", "ao@example.com");
+  runGit(repoPath, "config", "user.name", "AO Test");
+  runGit(repoPath, "remote", "add", "origin", remotePath);
+
+  writeRepoFile(repoPath, "README.md", "# test\n");
+  runGit(repoPath, "add", "README.md");
+  runGitWithEnv(
+    repoPath,
+    {
+      GIT_AUTHOR_DATE: initialCommitAt,
+      GIT_COMMITTER_DATE: initialCommitAt,
+    },
+    "commit",
+    "-m",
+    "init",
+  );
+
+  runGit(repoPath, "checkout", "-b", featureBranch);
+  writeRepoFile(repoPath, "feature.txt", "visible progress\n");
+  runGit(repoPath, "add", "feature.txt");
+  runGitWithEnv(
+    repoPath,
+    {
+      GIT_AUTHOR_DATE: featureCommitAt,
+      GIT_COMMITTER_DATE: featureCommitAt,
+    },
+    "commit",
+    "-m",
+    "feat: add visible progress",
+  );
+  runGit(repoPath, "push", "-u", "origin", featureBranch);
+  runGit(repoPath, "fetch", "origin");
+
   return repoPath;
 }
 
@@ -1241,6 +1297,214 @@ describe("check (single session)", () => {
     expect(vi.mocked(mockNotifier.notify).mock.calls.map(([event]) => event.type)).toEqual([
       "reaction.triggered",
     ]);
+  });
+
+  it("marks long-running no-push sessions as stuck when noCommitTimeout is exceeded", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-09T12:20:01.000Z"));
+
+    config.notificationRouting.urgent = ["desktop"];
+    config.reactions["agent-stuck"] = {
+      auto: true,
+      action: "notify",
+      priority: "urgent",
+      noCommitTimeout: "20m",
+    };
+
+    const mockNotifier: Notifier = {
+      name: "mock-notifier",
+      notify: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const registryWithNotifier: PluginRegistry = {
+      ...mockRegistry,
+      get: vi.fn().mockImplementation((slot: string, name: string) => {
+        if (slot === "runtime") return mockRuntime;
+        if (slot === "agent") return mockAgent;
+        if (slot === "notifier" && name === "desktop") return mockNotifier;
+        return null;
+      }),
+    };
+
+    const repoPath = createCommittedRepo(join(tmpDir, "no-commit-timeout-repo"));
+    runGit(repoPath, "checkout", "-b", "feat/test");
+
+    const createdAt = new Date("2026-03-09T12:00:00.000Z");
+    const session = makeSession({
+      status: "working",
+      pr: null,
+      branch: "feat/test",
+      workspacePath: repoPath,
+      createdAt,
+      metadata: {
+        status: "working",
+        project: "my-app",
+        branch: "feat/test",
+        createdAt: createdAt.toISOString(),
+      },
+    });
+    vi.mocked(mockSessionManager.get).mockResolvedValue(session);
+
+    writeMetadata(sessionsDir, "app-1", {
+      worktree: repoPath,
+      branch: "feat/test",
+      status: "working",
+      project: "my-app",
+      createdAt: createdAt.toISOString(),
+    });
+
+    const lm = createLifecycleManager({
+      config,
+      registry: registryWithNotifier,
+      sessionManager: mockSessionManager,
+    });
+
+    await lm.check("app-1");
+
+    expect(lm.getStates().get("app-1")).toBe("stuck");
+    expect(readMetadataRaw(sessionsDir, "app-1")?.["status"]).toBe("stuck");
+    expect(vi.mocked(mockNotifier.notify).mock.calls.map(([event]) => event.type)).toEqual([
+      "reaction.triggered",
+    ]);
+  });
+
+  it("respects a reset no-commit window after human steering", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-09T12:20:01.000Z"));
+
+    config.notificationRouting.urgent = ["desktop"];
+    config.reactions["agent-stuck"] = {
+      auto: true,
+      action: "notify",
+      priority: "urgent",
+      noCommitTimeout: "20m",
+    };
+
+    const mockNotifier: Notifier = {
+      name: "mock-notifier",
+      notify: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const registryWithNotifier: PluginRegistry = {
+      ...mockRegistry,
+      get: vi.fn().mockImplementation((slot: string, name: string) => {
+        if (slot === "runtime") return mockRuntime;
+        if (slot === "agent") return mockAgent;
+        if (slot === "notifier" && name === "desktop") return mockNotifier;
+        return null;
+      }),
+    };
+
+    const repoPath = createCommittedRepo(join(tmpDir, "no-commit-reset-repo"));
+    runGit(repoPath, "checkout", "-b", "feat/test");
+
+    const createdAt = new Date("2026-03-09T12:00:00.000Z");
+    const resetAt = new Date("2026-03-09T12:10:30.000Z");
+    const session = makeSession({
+      status: "working",
+      pr: null,
+      branch: "feat/test",
+      workspacePath: repoPath,
+      createdAt,
+      metadata: {
+        status: "working",
+        project: "my-app",
+        branch: "feat/test",
+        createdAt: createdAt.toISOString(),
+        noCommitWindowStartedAt: resetAt.toISOString(),
+      },
+    });
+    vi.mocked(mockSessionManager.get).mockResolvedValue(session);
+
+    writeMetadata(sessionsDir, "app-1", {
+      worktree: repoPath,
+      branch: "feat/test",
+      status: "working",
+      project: "my-app",
+      createdAt: createdAt.toISOString(),
+      noCommitWindowStartedAt: resetAt.toISOString(),
+    });
+
+    const lm = createLifecycleManager({
+      config,
+      registry: registryWithNotifier,
+      sessionManager: mockSessionManager,
+    });
+
+    await lm.check("app-1");
+
+    expect(lm.getStates().get("app-1")).toBe("working");
+    expect(mockNotifier.notify).not.toHaveBeenCalled();
+  });
+
+  it("satisfies noCommitTimeout permanently after a pushed commit is detected", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-09T12:30:01.000Z"));
+
+    config.notificationRouting.urgent = ["desktop"];
+    config.reactions["agent-stuck"] = {
+      auto: true,
+      action: "notify",
+      priority: "urgent",
+      noCommitTimeout: "20m",
+    };
+
+    const mockNotifier: Notifier = {
+      name: "mock-notifier",
+      notify: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const registryWithNotifier: PluginRegistry = {
+      ...mockRegistry,
+      get: vi.fn().mockImplementation((slot: string, name: string) => {
+        if (slot === "runtime") return mockRuntime;
+        if (slot === "agent") return mockAgent;
+        if (slot === "notifier" && name === "desktop") return mockNotifier;
+        return null;
+      }),
+    };
+
+    const repoPath = createRepoWithPushedFeatureCommit(
+      join(tmpDir, "no-commit-satisfied-repo"),
+      "feat/test",
+      "2026-03-09T12:00:00Z",
+      "2026-03-09T12:15:00Z",
+    );
+    const createdAt = new Date("2026-03-09T12:10:00.000Z");
+    const session = makeSession({
+      status: "working",
+      pr: null,
+      branch: "feat/test",
+      workspacePath: repoPath,
+      createdAt,
+      metadata: {
+        status: "working",
+        project: "my-app",
+        branch: "feat/test",
+        createdAt: createdAt.toISOString(),
+      },
+    });
+    vi.mocked(mockSessionManager.get).mockResolvedValue(session);
+
+    writeMetadata(sessionsDir, "app-1", {
+      worktree: repoPath,
+      branch: "feat/test",
+      status: "working",
+      project: "my-app",
+      createdAt: createdAt.toISOString(),
+    });
+
+    const lm = createLifecycleManager({
+      config,
+      registry: registryWithNotifier,
+      sessionManager: mockSessionManager,
+    });
+
+    await lm.check("app-1");
+
+    expect(lm.getStates().get("app-1")).toBe("working");
+    expect(readMetadataRaw(sessionsDir, "app-1")?.["noCommitSatisfiedAt"]).toBeDefined();
+    expect(mockNotifier.notify).not.toHaveBeenCalled();
   });
 
   it("exempts sessions from maxRuntime once a PR is auto-detected", async () => {

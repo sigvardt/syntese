@@ -272,6 +272,7 @@ describe("review-check command", () => {
     expect(mockSessionManager.send).toHaveBeenCalledWith(
       "app-1",
       expect.stringContaining("review comments"),
+      { resetNoCommitTimeout: true },
     );
     expect(mockExec).not.toHaveBeenCalled();
   });

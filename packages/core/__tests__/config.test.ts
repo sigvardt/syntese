@@ -158,7 +158,7 @@ reactions:
       );
     });
 
-    it("loads agent-stuck maxRuntime alongside the default stuck settings", () => {
+    it("loads agent-stuck maxRuntime and noCommitTimeout alongside the default stuck settings", () => {
       const configPath = join(testDir, "agent-stuck-config.yaml");
       writeFileSync(
         configPath,
@@ -172,6 +172,7 @@ reactions:
   agent-stuck:
     auto: true
     action: notify
+    noCommitTimeout: 20m
     maxRuntime: 30m
 `,
       );
@@ -185,6 +186,7 @@ reactions:
           priority: "urgent",
           refireIntervalMs: 300_000,
           threshold: "10m",
+          noCommitTimeout: "20m",
           maxRuntime: "30m",
         }),
       );

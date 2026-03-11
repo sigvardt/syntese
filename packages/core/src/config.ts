@@ -86,6 +86,7 @@ const ReactionConfigSchema = z.object({
   escalateAfter: z.union([z.number(), z.string()]).optional(),
   threshold: z.string().optional(),
   maxRuntime: z.string().optional(),
+  noCommitTimeout: z.string().optional(),
   firstCommit: z.string().optional(),
   firstPR: z.string().optional(),
   checkpointMessage: z.string().optional(),

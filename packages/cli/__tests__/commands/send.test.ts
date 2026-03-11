@@ -329,7 +329,9 @@ describe("send command", () => {
 
       await program.parseAsync(["node", "test", "send", "app-1", "hello", "opencode"]);
 
-      expect(mockSessionManager.send).toHaveBeenCalledWith("app-1", "hello opencode");
+      expect(mockSessionManager.send).toHaveBeenCalledWith("app-1", "hello opencode", {
+        resetNoCommitTimeout: true,
+      });
       expect(mockGetSessionsDir).toHaveBeenCalledWith("/tmp/syntese.yaml", "/tmp/my-app");
       expect(mockUpdateMetadata).toHaveBeenCalledWith(
         "/tmp/sessions",
@@ -373,7 +375,9 @@ describe("send command", () => {
 
       await program.parseAsync(["node", "test", "send", "app-1", "fix", "mapping"]);
 
-      expect(mockSessionManager.send).toHaveBeenCalledWith("app-1", "fix mapping");
+      expect(mockSessionManager.send).toHaveBeenCalledWith("app-1", "fix mapping", {
+        resetNoCommitTimeout: true,
+      });
       expect(consoleSpy).not.toHaveBeenCalledWith(
         expect.stringContaining("Waiting for app-1 to become idle"),
       );
@@ -408,7 +412,9 @@ describe("send command", () => {
 
       await program.parseAsync(["node", "test", "send", "app-1", "hello"]);
 
-      expect(mockSessionManager.send).toHaveBeenCalledWith("app-1", "hello");
+      expect(mockSessionManager.send).toHaveBeenCalledWith("app-1", "hello", {
+        resetNoCommitTimeout: true,
+      });
       expect(mockTmux).not.toHaveBeenCalledWith("has-session", "-t", expect.any(String));
     });
 
@@ -445,7 +451,9 @@ describe("send command", () => {
         rmSync(filePath, { force: true });
       }
 
-      expect(mockSessionManager.send).toHaveBeenCalledWith("app-1", "from file");
+      expect(mockSessionManager.send).toHaveBeenCalledWith("app-1", "from file", {
+        resetNoCommitTimeout: true,
+      });
     });
   });
 });

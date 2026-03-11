@@ -138,7 +138,9 @@ export function registerReviewCheck(program: Command): void {
             const globalReaction = config.reactions["changes-requested"];
             const reviewFixPrompt =
               projectReaction?.message ?? globalReaction?.message ?? DEFAULT_REVIEW_FIX_PROMPT;
-            await sm.send(result.sessionId, reviewFixPrompt);
+            await sm.send(result.sessionId, reviewFixPrompt, {
+              resetNoCommitTimeout: true,
+            });
             console.log(chalk.green(`    -> Fix prompt sent`));
           } catch (err) {
             console.error(chalk.red(`    -> Failed to send: ${err}`));

@@ -979,6 +979,9 @@ export interface ReactionConfig {
   /** Maximum session age before agent-stuck fires when no PR exists (e.g. "30m") */
   maxRuntime?: string;
 
+  /** Maximum time without a pushed commit before agent-stuck fires (e.g. "20m") */
+  noCommitTimeout?: string;
+
   /** Progress checkpoint threshold for the first pushed commit (e.g. "15m") */
   firstCommit?: string;
 
@@ -1412,6 +1415,8 @@ export interface SessionMetadata {
   progressCheckpointMissCount?: string;
   progressCheckpointFirstCommitFiredAt?: string;
   progressCheckpointFirstPRFiredAt?: string;
+  noCommitWindowStartedAt?: string;
+  noCommitSatisfiedAt?: string;
 }
 
 // =============================================================================
@@ -1430,8 +1435,13 @@ export interface SessionManager {
     projectId?: string,
     options?: { dryRun?: boolean; purgeOpenCode?: boolean },
   ): Promise<CleanupResult>;
-  send(sessionId: SessionId, message: string): Promise<void>;
+  send(sessionId: SessionId, message: string, options?: SendSessionOptions): Promise<void>;
   claimPR(sessionId: SessionId, prRef: string, options?: ClaimPROptions): Promise<ClaimPRResult>;
+}
+
+export interface SendSessionOptions {
+  /** Reset the no-commit timeout window after a human steering action. */
+  resetNoCommitTimeout?: boolean;
 }
 
 /** OpenCode-specific session manager with remap capability */
