@@ -490,6 +490,55 @@ describe("UsagePanels", () => {
 
     vi.useRealTimers();
   });
+
+  it("uses a dense six-dial grid with smaller dashboard gauges", () => {
+    const labels = [
+      "5 hour usage limit",
+      "Weekly usage limit",
+      "GPT-5.3-Codex-Spark 5 hour usage limit",
+      "GPT-5.3-Codex-Spark Weekly usage limit",
+      "Code review",
+      "Credits remaining",
+    ];
+    const dials = labels.map((label, index) => ({
+      id: `codex-dial-${index}`,
+      label,
+      kind: "percent_remaining" as const,
+      status: "available" as const,
+      value: 82 - index,
+      maxValue: 100,
+      displayValue: `${82 - index}%`,
+      resetsAt: null,
+    }));
+
+    const { container } = render(
+      <UsagePanels
+        snapshots={[
+          {
+            provider: "codex",
+            plan: "ChatGPT Pro",
+            capturedAt: "2026-03-10T10:00:00.000Z",
+            source: "live",
+            dials,
+          },
+        ]}
+      />,
+    );
+
+    const section = screen.getByText("Codex").closest("section");
+    expect(section).not.toBeNull();
+
+    const grid = section?.querySelector(".grid");
+    expect(grid).not.toBeNull();
+    expect(grid).toHaveClass("xl:grid-cols-6");
+
+    const gauges = container.querySelectorAll('svg[width="92"][height="92"]');
+    expect(gauges).toHaveLength(6);
+
+    expect(screen.getByTitle("GPT-5.3-Codex-Spark 5 hour usage limit")).toHaveClass(
+      "min-h-[2.5rem]",
+    );
+  });
 });
 
 // ── AttentionZone ────────────────────────────────────────────────────
