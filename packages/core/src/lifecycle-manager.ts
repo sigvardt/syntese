@@ -1547,17 +1547,31 @@ export function createLifecycleManager(deps: LifecycleManagerDeps): LifecycleMan
     }
   }
 
+  function getAgentStuckReactionConfig(session: Session): ReactionConfig | null {
+    return getReactionConfigForSession(session, "agent-stuck");
+  }
+
   /** Check if idle time exceeds the agent-stuck threshold. */
   function isIdleBeyondThreshold(session: Session, idleTimestamp: Date): boolean {
-    const stuckReaction =
-      config.projects[session.projectId]?.reactions?.["agent-stuck"] ??
-      config.reactions["agent-stuck"];
-    const thresholdStr = (stuckReaction as Record<string, unknown> | undefined)?.threshold;
+    const thresholdStr = getAgentStuckReactionConfig(session)?.threshold;
     if (typeof thresholdStr !== "string") return false;
     const stuckThresholdMs = parseDuration(thresholdStr);
     if (stuckThresholdMs <= 0) return false;
     const idleMs = Date.now() - idleTimestamp.getTime();
     return idleMs > stuckThresholdMs;
+  }
+
+  /** Check if session age exceeds the agent-stuck max runtime without a PR. */
+  function isBeyondMaxRuntime(session: Session): boolean {
+    const maxRuntimeStr = getAgentStuckReactionConfig(session)?.maxRuntime;
+    if (typeof maxRuntimeStr !== "string") return false;
+    const maxRuntimeMs = parseDuration(maxRuntimeStr);
+    if (maxRuntimeMs <= 0) return false;
+
+    const createdAtMs = session.createdAt.getTime();
+    if (!Number.isFinite(createdAtMs)) return false;
+
+    return Date.now() - createdAtMs > maxRuntimeMs;
   }
 
   async function evaluateOpenPR(
@@ -1913,6 +1927,10 @@ export function createLifecycleManager(deps: LifecycleManagerDeps): LifecycleMan
 
     if (preserveCurrentStatus) {
       return currentStatus;
+    }
+
+    if (!session.pr && isBeyondMaxRuntime(session)) {
+      return SESSION_STATUS.STUCK;
     }
 
     // 5. Agents can finish a turn without exiting. When they become ready/idle and

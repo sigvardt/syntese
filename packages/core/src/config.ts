@@ -80,6 +80,7 @@ const ReactionConfigSchema = z.object({
   refireIntervalMs: z.number().nonnegative().optional(),
   escalateAfter: z.union([z.number(), z.string()]).optional(),
   threshold: z.string().optional(),
+  maxRuntime: z.string().optional(),
   includeSummary: z.boolean().optional(),
 });
 
