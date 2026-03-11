@@ -647,6 +647,14 @@ async function runGitProgressCommand(args: string[], cwd: string): Promise<strin
   }
 }
 
+async function countPushedCommitsSince(workspacePath: string, sinceIso: string): Promise<number> {
+  const output = await runGitProgressCommand(
+    ["rev-list", "--count", `--since=${sinceIso}`, "@{u}"],
+    workspacePath,
+  );
+  return output ? Math.max(0, Number.parseInt(output, 10) || 0) : 0;
+}
+
 function parseDirtyFiles(output: string | null): string[] {
   if (!output) return [];
 
@@ -1653,6 +1661,36 @@ export function createLifecycleManager(deps: LifecycleManagerDeps): LifecycleMan
     return Date.now() - createdAtMs > maxRuntimeMs;
   }
 
+  /** Check if a session has gone too long without a pushed commit. */
+  async function isBeyondNoCommitTimeout(session: Session): Promise<boolean> {
+    const noCommitTimeoutStr = getAgentStuckReactionConfig(session)?.noCommitTimeout;
+    if (typeof noCommitTimeoutStr !== "string") return false;
+    const noCommitTimeoutMs = parseDuration(noCommitTimeoutStr);
+    if (noCommitTimeoutMs <= 0) return false;
+    if (typeof session.metadata["noCommitSatisfiedAt"] === "string") return false;
+    if (!session.workspacePath) return false;
+
+    const createdAtMs = session.createdAt.getTime();
+    if (!Number.isFinite(createdAtMs)) return false;
+
+    const windowStartedAtMs = Math.max(
+      parseTimestampMs(session.metadata["noCommitWindowStartedAt"]) ?? createdAtMs,
+      createdAtMs,
+    );
+    if (Date.now() - windowStartedAtMs <= noCommitTimeoutMs) return false;
+
+    const pushedCommitsSinceWindow = await countPushedCommitsSince(
+      session.workspacePath,
+      new Date(windowStartedAtMs).toISOString(),
+    );
+    if (pushedCommitsSinceWindow > 0) {
+      updateSessionMetadata(session, { noCommitSatisfiedAt: new Date().toISOString() });
+      return false;
+    }
+
+    return true;
+  }
+
   async function evaluateOpenPR(
     session: Session,
     scm: SCM,
@@ -2006,6 +2044,10 @@ export function createLifecycleManager(deps: LifecycleManagerDeps): LifecycleMan
 
     if (preserveCurrentStatus) {
       return currentStatus;
+    }
+
+    if (!session.pr && (await isBeyondNoCommitTimeout(session))) {
+      return SESSION_STATUS.STUCK;
     }
 
     if (!session.pr && isBeyondMaxRuntime(session)) {

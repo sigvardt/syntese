@@ -209,7 +209,7 @@ export function registerSend(program: Command): void {
         }
 
         if (existingSession && sessionManager) {
-          await sessionManager.send(session, message);
+          await sessionManager.send(session, message, { resetNoCommitTimeout: true });
           markProgressCheckpointReset(config, existingSession);
           console.log(chalk.green("Message sent and processing"));
           return;

@@ -72,7 +72,7 @@ spawning → working → completed
 - `changes-requested` → send review comments to agent
 - `progress-checkpoints` → nudge sessions that miss early commit/PR milestones
 - `approved-and-green` → notify human (or auto-merge)
-- `agent-stuck` → notify human (`threshold` for idle sessions, optional `maxRuntime` for no-PR timeouts)
+- `agent-stuck` → notify human (`threshold` for idle sessions, optional `noCommitTimeout` for no-push sessions, optional `maxRuntime` for no-PR timeouts)
 
 **Polling loop:**
 

@@ -43,6 +43,7 @@ import {
   type PluginRegistry,
   type RuntimeHandle,
   type Issue,
+  type SendSessionOptions,
   PR_STATE,
 } from "./types.js";
 import {
@@ -89,6 +90,7 @@ const PROCESS_TERMINATION_TIMEOUT_MS = 5_000;
 const PROCESS_TERMINATION_POLL_MS = 200;
 const TMUX_KILL_TIMEOUT_MS = 5_000;
 const GIT_CLEANUP_TIMEOUT_MS = 30_000;
+const GIT_PROGRESS_TIMEOUT_MS = 5_000;
 
 interface ProcessSnapshot {
   pid: number;
@@ -110,6 +112,23 @@ function getExitCode(err: unknown): number | null {
 
 function formatError(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+async function countPushedCommitsSince(workspacePath: string, sinceIso: string): Promise<number> {
+  try {
+    const { stdout } = await execFileAsync(
+      "git",
+      ["rev-list", "--count", `--since=${sinceIso}`, "@{u}"],
+      {
+        cwd: workspacePath,
+        timeout: GIT_PROGRESS_TIMEOUT_MS,
+        maxBuffer: 1024 * 1024,
+      },
+    );
+    return Math.max(0, Number.parseInt(stdout.trim(), 10) || 0);
+  } catch {
+    return 0;
+  }
 }
 
 function emitKillStep(
@@ -2154,7 +2173,11 @@ export function createSessionManager(deps: SessionManagerDeps): OpenCodeSessionM
     return result;
   }
 
-  async function send(sessionId: SessionId, message: string): Promise<void> {
+  async function send(
+    sessionId: SessionId,
+    message: string,
+    options?: SendSessionOptions,
+  ): Promise<void> {
     const { raw, sessionsDir, project } = requireSessionRecord(sessionId);
     const persistedStatus = validateStatus(raw["status"]);
     const pause = getProjectPause(project);
@@ -2365,10 +2388,37 @@ export function createSessionManager(deps: SessionManagerDeps): OpenCodeSessionM
       }
     }
 
+    const metadataUpdates: Partial<Record<string, string>> = {};
+
     // A freshly delivered prompt means the session is actively working again,
     // even if the last persisted status was idle/stuck/review-related.
     if (!NON_RESTORABLE_STATUSES.has(persistedStatus)) {
-      updateMetadata(sessionsDir, sessionId, { status: "working" });
+      metadataUpdates["status"] = "working";
+    }
+
+    if (options?.resetNoCommitTimeout) {
+      const resetAt = new Date().toISOString();
+      const createdAtMs = raw["createdAt"] ? Date.parse(raw["createdAt"]) : Number.NaN;
+      const workspacePath = raw["worktree"];
+
+      if (workspacePath && Number.isFinite(createdAtMs)) {
+        const pushedCommitsSinceSpawn = await countPushedCommitsSince(
+          workspacePath,
+          new Date(createdAtMs).toISOString(),
+        );
+
+        if (pushedCommitsSinceSpawn > 0) {
+          metadataUpdates["noCommitSatisfiedAt"] = resetAt;
+        } else {
+          metadataUpdates["noCommitWindowStartedAt"] = resetAt;
+        }
+      } else {
+        metadataUpdates["noCommitWindowStartedAt"] = resetAt;
+      }
+    }
+
+    if (Object.keys(metadataUpdates).length > 0) {
+      updateMetadata(sessionsDir, sessionId, metadataUpdates);
     }
   }
 
@@ -2577,6 +2627,12 @@ export function createSessionManager(deps: SessionManagerDeps): OpenCodeSessionM
         createdAt: raw["createdAt"],
         runtimeHandle: raw["runtimeHandle"],
         opencodeSessionId: raw["opencodeSessionId"],
+        progressCheckpointResetAt: raw["progressCheckpointResetAt"],
+        progressCheckpointMissCount: raw["progressCheckpointMissCount"],
+        progressCheckpointFirstCommitFiredAt: raw["progressCheckpointFirstCommitFiredAt"],
+        progressCheckpointFirstPRFiredAt: raw["progressCheckpointFirstPRFiredAt"],
+        noCommitWindowStartedAt: raw["noCommitWindowStartedAt"],
+        noCommitSatisfiedAt: raw["noCommitSatisfiedAt"],
       });
     }
 
