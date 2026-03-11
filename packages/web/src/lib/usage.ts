@@ -1,6 +1,5 @@
 import {
   getProjectBaseDir,
-  getSessionsDir,
   type Agent,
   type CostEstimate,
   type OrchestratorConfig,
