@@ -158,6 +158,38 @@ reactions:
       );
     });
 
+    it("loads agent-stuck maxRuntime alongside the default stuck settings", () => {
+      const configPath = join(testDir, "agent-stuck-config.yaml");
+      writeFileSync(
+        configPath,
+        `
+projects:
+  test-project:
+    repo: test/repo
+    path: ${testDir}
+    defaultBranch: main
+reactions:
+  agent-stuck:
+    auto: true
+    action: notify
+    maxRuntime: 30m
+`,
+      );
+
+      const config = loadConfig(configPath);
+
+      expect(config.reactions["agent-stuck"]).toEqual(
+        expect.objectContaining({
+          auto: true,
+          action: "notify",
+          priority: "urgent",
+          refireIntervalMs: 300_000,
+          threshold: "10m",
+          maxRuntime: "30m",
+        }),
+      );
+    });
+
     it("parses progressChecks config and normalizes notify to an array", () => {
       const configPath = join(testDir, "progress-config.yaml");
 

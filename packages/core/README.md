@@ -71,7 +71,7 @@ spawning → working → completed
 - `ci-failed` → send fix prompt to agent
 - `changes-requested` → send review comments to agent
 - `approved-and-green` → notify human (or auto-merge)
-- `agent-stuck` → notify human
+- `agent-stuck` → notify human (`threshold` for idle sessions, optional `maxRuntime` for no-PR timeouts)
 
 **Polling loop:**
 

@@ -898,6 +898,207 @@ describe("check (single session)", () => {
     ]);
   });
 
+  it("marks long-running no-PR sessions as stuck when maxRuntime is exceeded", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-09T12:30:01.000Z"));
+
+    config.notificationRouting.urgent = ["desktop"];
+    config.reactions["agent-stuck"] = {
+      auto: true,
+      action: "notify",
+      priority: "urgent",
+      maxRuntime: "30m",
+    };
+
+    const mockNotifier: Notifier = {
+      name: "mock-notifier",
+      notify: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const registryWithNotifier: PluginRegistry = {
+      ...mockRegistry,
+      get: vi.fn().mockImplementation((slot: string, name: string) => {
+        if (slot === "runtime") return mockRuntime;
+        if (slot === "agent") return mockAgent;
+        if (slot === "notifier" && name === "desktop") return mockNotifier;
+        return null;
+      }),
+    };
+
+    const createdAt = new Date("2026-03-09T12:00:00.000Z");
+    const session = makeSession({
+      status: "working",
+      pr: null,
+      createdAt,
+    });
+    vi.mocked(mockSessionManager.get).mockResolvedValue(session);
+
+    writeMetadata(sessionsDir, "app-1", {
+      worktree: "/tmp",
+      branch: "main",
+      status: "working",
+      project: "my-app",
+      createdAt: createdAt.toISOString(),
+    });
+
+    const lm = createLifecycleManager({
+      config,
+      registry: registryWithNotifier,
+      sessionManager: mockSessionManager,
+    });
+
+    await lm.check("app-1");
+
+    expect(lm.getStates().get("app-1")).toBe("stuck");
+    expect(readMetadataRaw(sessionsDir, "app-1")?.["status"]).toBe("stuck");
+    expect(vi.mocked(mockNotifier.notify).mock.calls.map(([event]) => event.type)).toEqual([
+      "reaction.triggered",
+    ]);
+  });
+
+  it("exempts sessions from maxRuntime once a PR is auto-detected", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-09T12:30:01.000Z"));
+
+    config.notificationRouting.urgent = ["desktop"];
+    config.reactions["agent-stuck"] = {
+      auto: true,
+      action: "notify",
+      priority: "urgent",
+      maxRuntime: "30m",
+    };
+
+    const pr = makePR();
+    const mockNotifier: Notifier = {
+      name: "mock-notifier",
+      notify: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const mockSCM: SCM = {
+      name: "mock-scm",
+      detectPR: vi.fn().mockResolvedValue(pr),
+      getPRState: vi.fn().mockResolvedValue("open"),
+      mergePR: vi.fn(),
+      closePR: vi.fn(),
+      getCIChecks: vi.fn(),
+      getCISummary: vi.fn().mockResolvedValue("none"),
+      getReviews: vi.fn(),
+      getReviewDecision: vi.fn().mockResolvedValue("none"),
+      getPendingComments: vi.fn().mockResolvedValue([]),
+      getAutomatedComments: vi.fn().mockResolvedValue([]),
+      getMergeability: vi.fn().mockResolvedValue({
+        mergeable: false,
+        ciPassing: false,
+        approved: false,
+        noConflicts: true,
+        blockers: ["ci"],
+      }),
+    };
+
+    const registryWithNotifierAndScm: PluginRegistry = {
+      ...mockRegistry,
+      get: vi.fn().mockImplementation((slot: string, name: string) => {
+        if (slot === "runtime") return mockRuntime;
+        if (slot === "agent") return mockAgent;
+        if (slot === "scm") return mockSCM;
+        if (slot === "notifier" && name === "desktop") return mockNotifier;
+        return null;
+      }),
+    };
+
+    const createdAt = new Date("2026-03-09T12:00:00.000Z");
+    const session = makeSession({
+      status: "working",
+      pr: null,
+      branch: pr.branch,
+      createdAt,
+    });
+    vi.mocked(mockSessionManager.get).mockResolvedValue(session);
+
+    writeMetadata(sessionsDir, "app-1", {
+      worktree: "/tmp",
+      branch: pr.branch,
+      status: "working",
+      project: "my-app",
+      createdAt: createdAt.toISOString(),
+    });
+
+    const lm = createLifecycleManager({
+      config,
+      registry: registryWithNotifierAndScm,
+      sessionManager: mockSessionManager,
+    });
+
+    await lm.check("app-1");
+
+    expect(mockSCM.detectPR).toHaveBeenCalledWith(session, config.projects["my-app"]);
+    expect(lm.getStates().get("app-1")).toBe("pr_open");
+    expect(readMetadataRaw(sessionsDir, "app-1")?.["pr"]).toBe(pr.url);
+    expect(mockNotifier.notify).not.toHaveBeenCalled();
+  });
+
+  it("re-fires maxRuntime stuck notifications after the configured interval", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-09T12:30:01.000Z"));
+
+    config.notificationRouting.urgent = ["desktop"];
+    config.reactions["agent-stuck"] = {
+      auto: true,
+      action: "notify",
+      priority: "urgent",
+      maxRuntime: "30m",
+      refireIntervalMs: 120_000,
+    };
+
+    const mockNotifier: Notifier = {
+      name: "mock-notifier",
+      notify: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const registryWithNotifier: PluginRegistry = {
+      ...mockRegistry,
+      get: vi.fn().mockImplementation((slot: string, name: string) => {
+        if (slot === "runtime") return mockRuntime;
+        if (slot === "agent") return mockAgent;
+        if (slot === "notifier" && name === "desktop") return mockNotifier;
+        return null;
+      }),
+    };
+
+    const createdAt = new Date("2026-03-09T12:00:00.000Z");
+    const session = makeSession({
+      status: "working",
+      pr: null,
+      createdAt,
+    });
+    vi.mocked(mockSessionManager.get).mockResolvedValue(session);
+
+    writeMetadata(sessionsDir, "app-1", {
+      worktree: "/tmp",
+      branch: "main",
+      status: "working",
+      project: "my-app",
+      createdAt: createdAt.toISOString(),
+    });
+
+    const lm = createLifecycleManager({
+      config,
+      registry: registryWithNotifier,
+      sessionManager: mockSessionManager,
+    });
+
+    await lm.check("app-1");
+    expect(mockNotifier.notify).toHaveBeenCalledTimes(1);
+
+    vi.setSystemTime(new Date("2026-03-09T12:32:00.000Z"));
+    await lm.check("app-1");
+    expect(mockNotifier.notify).toHaveBeenCalledTimes(1);
+
+    vi.setSystemTime(new Date("2026-03-09T12:32:02.000Z"));
+    await lm.check("app-1");
+    expect(mockNotifier.notify).toHaveBeenCalledTimes(2);
+  });
+
   it("stays working when agent is idle but process is still running (fallback path)", async () => {
     vi.mocked(mockAgent.getActivityState).mockResolvedValue(null);
     vi.mocked(mockAgent.detectActivity).mockReturnValue("idle");

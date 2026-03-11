@@ -974,6 +974,9 @@ export interface ReactionConfig {
   /** Threshold duration for time-based triggers (e.g. "10m" for stuck detection) */
   threshold?: string;
 
+  /** Maximum session age before agent-stuck fires when no PR exists (e.g. "30m") */
+  maxRuntime?: string;
+
   /** Whether to include a summary in the notification */
   includeSummary?: boolean;
 }
