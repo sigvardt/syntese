@@ -66,6 +66,7 @@ import {
 } from "./paths.js";
 import { asValidOpenCodeSessionId } from "./opencode-session-id.js";
 import { normalizeOrchestratorSessionStrategy } from "./orchestrator-session-strategy.js";
+import { getAccountEnvironment, resolveAccount } from "./accounts.js";
 import {
   GLOBAL_PAUSE_REASON_KEY,
   GLOBAL_PAUSE_SOURCE_KEY,
@@ -1115,6 +1116,40 @@ export function createSessionManager(deps: SessionManagerDeps): OpenCodeSessionM
       subagent: spawnConfig.subagent ?? configuredSubagent,
     };
 
+    const selectedAgentName = plugins.agent.name;
+    const routingSessions = listAllSessions().flatMap(({ sessionName, projectId: sessionProjectId }) => {
+      const sessionProject = config.projects[sessionProjectId];
+      if (!sessionProject) {
+        return [] as Session[];
+      }
+
+      const raw = readMetadataRaw(getProjectSessionsDir(sessionProject), sessionName);
+      if (!raw) {
+        return [] as Session[];
+      }
+
+      return [metadataToSession(sessionName, raw)];
+    });
+
+    const accountId =
+      spawnConfig.account ??
+      (await selectAccountForProject(
+        config,
+        spawnConfig.projectId,
+        registry,
+        routingSessions,
+        {
+          agent: selectedAgentName,
+          model: project.agentConfig?.model,
+        },
+      ).catch(() => resolveAccountForProject(config, spawnConfig.projectId, { agent: selectedAgentName })));
+
+    const resolvedAccount = resolveAccount(config, {
+      projectId: spawnConfig.projectId,
+      accountId,
+      agentName: selectedAgentName,
+    });
+
     let handle: RuntimeHandle;
     try {
       const launchCommand = plugins.agent.getLaunchCommand(agentLaunchConfig);
@@ -1126,9 +1161,16 @@ export function createSessionManager(deps: SessionManagerDeps): OpenCodeSessionM
         launchCommand,
         environment: {
           ...environment,
+          ...getAccountEnvironment(resolvedAccount.accountId, resolvedAccount.account, {
+            useApiKeyFallback: true,
+          }),
           AO_SESSION: sessionId,
           AO_DATA_DIR: sessionsDir, // Pass sessions directory (not root dataDir)
           AO_SESSION_NAME: sessionId, // User-facing session name
+          AO_ACCOUNT_ID: resolvedAccount.accountId,
+          ...(resolvedAccount.account.auth?.profile
+            ? { AO_AUTH_PROFILE: resolvedAccount.account.auth.profile }
+            : {}),
           ...(tmuxName && { AO_TMUX_NAME: tmuxName }), // Tmux session name if using new arch
         },
       });
@@ -1167,39 +1209,11 @@ export function createSessionManager(deps: SessionManagerDeps): OpenCodeSessionM
       createdAt: new Date(),
       lastActivityAt: new Date(),
       metadata: {
+        accountId: resolvedAccount.accountId,
         ...(reusedOpenCodeSessionId ? { opencodeSessionId: reusedOpenCodeSessionId } : {}),
       },
     };
-    const selectedAgentName = plugins.agent.name;
-
-    const routingSessions = listAllSessions().flatMap(({ sessionName, projectId: sessionProjectId }) => {
-      const sessionProject = config.projects[sessionProjectId];
-      if (!sessionProject) {
-        return [] as Session[];
-      }
-
-      const raw = readMetadataRaw(getProjectSessionsDir(sessionProject), sessionName);
-      if (!raw) {
-        return [] as Session[];
-      }
-
-      return [metadataToSession(sessionName, raw)];
-    });
-
-    const accountId = await selectAccountForProject(
-      config,
-      spawnConfig.projectId,
-      registry,
-      routingSessions,
-      {
-        agent: selectedAgentName,
-        model: project.agentConfig?.model,
-      },
-    ).catch(() =>
-      resolveAccountForProject(config, spawnConfig.projectId, { agent: selectedAgentName }),
-    );
-
-    session.metadata["accountId"] = accountId;
+    session.metadata["accountId"] = resolvedAccount.accountId;
 
     try {
       writeMetadata(sessionsDir, sessionId, {
@@ -1207,10 +1221,10 @@ export function createSessionManager(deps: SessionManagerDeps): OpenCodeSessionM
         branch,
         status: "spawning",
         tmuxName, // Store tmux name for mapping
+        accountId: resolvedAccount.accountId,
         issue: spawnConfig.issueId,
         project: spawnConfig.projectId,
         agent: selectedAgentName, // Persist agent name for lifecycle manager
-        accountId,
         createdAt: new Date().toISOString(),
         runtimeHandle: JSON.stringify(handle),
         opencodeSessionId: reusedOpenCodeSessionId,
@@ -1442,6 +1456,10 @@ export function createSessionManager(deps: SessionManagerDeps): OpenCodeSessionM
 
     const launchCommand = plugins.agent.getLaunchCommand(agentLaunchConfig);
     const environment = plugins.agent.getEnvironment(agentLaunchConfig);
+    const resolvedAccount = resolveAccount(config, {
+      projectId: orchestratorConfig.projectId,
+      agentName: plugins.agent.name,
+    });
 
     const handle = await plugins.runtime.create({
       sessionId: tmuxName ?? sessionId,
@@ -1449,9 +1467,16 @@ export function createSessionManager(deps: SessionManagerDeps): OpenCodeSessionM
       launchCommand,
       environment: {
         ...environment,
+        ...getAccountEnvironment(resolvedAccount.accountId, resolvedAccount.account, {
+          useApiKeyFallback: true,
+        }),
         AO_SESSION: sessionId,
         AO_DATA_DIR: sessionsDir,
         AO_SESSION_NAME: sessionId,
+        AO_ACCOUNT_ID: resolvedAccount.accountId,
+        ...(resolvedAccount.account.auth?.profile
+          ? { AO_AUTH_PROFILE: resolvedAccount.account.auth.profile }
+          : {}),
         ...(tmuxName && { AO_TMUX_NAME: tmuxName }),
       },
     });
@@ -1471,6 +1496,7 @@ export function createSessionManager(deps: SessionManagerDeps): OpenCodeSessionM
       createdAt: new Date(),
       lastActivityAt: new Date(),
       metadata: {
+        accountId: resolvedAccount.accountId,
         ...(reusableOpenCodeSessionId ? { opencodeSessionId: reusableOpenCodeSessionId } : {}),
       },
     };
@@ -1482,6 +1508,7 @@ export function createSessionManager(deps: SessionManagerDeps): OpenCodeSessionM
         status: "working",
         role: "orchestrator",
         tmuxName,
+        accountId: resolvedAccount.accountId,
         project: orchestratorConfig.projectId,
         agent: plugins.agent.name,
         createdAt: new Date().toISOString(),
@@ -2541,6 +2568,7 @@ export function createSessionManager(deps: SessionManagerDeps): OpenCodeSessionM
         tmuxName: raw["tmuxName"],
         issue: raw["issue"],
         pr: raw["pr"],
+        accountId: raw["accountId"],
         prAutoDetect:
           raw["prAutoDetect"] === "off" ? "off" : raw["prAutoDetect"] === "on" ? "on" : undefined,
         summary: raw["summary"],
@@ -2632,6 +2660,12 @@ export function createSessionManager(deps: SessionManagerDeps): OpenCodeSessionM
       subagent: configuredSubagent,
     };
 
+    const resolvedAccount = resolveAccount(config, {
+      projectId: session.projectId,
+      accountId: raw["accountId"],
+      agentName: raw["agent"] ?? project.agent ?? config.defaults.agent,
+    });
+
     if (plugins.agent.getRestoreCommand) {
       const restoreCmd = await plugins.agent.getRestoreCommand(session, project);
       launchCommand = restoreCmd ?? plugins.agent.getLaunchCommand(agentLaunchConfig);
@@ -2649,9 +2683,16 @@ export function createSessionManager(deps: SessionManagerDeps): OpenCodeSessionM
       launchCommand,
       environment: {
         ...environment,
+        ...getAccountEnvironment(resolvedAccount.accountId, resolvedAccount.account, {
+          useApiKeyFallback: true,
+        }),
         AO_SESSION: sessionId,
         AO_DATA_DIR: sessionsDir,
         AO_SESSION_NAME: sessionId,
+        AO_ACCOUNT_ID: resolvedAccount.accountId,
+        ...(resolvedAccount.account.auth?.profile
+          ? { AO_AUTH_PROFILE: resolvedAccount.account.auth.profile }
+          : {}),
         ...(tmuxName && { AO_TMUX_NAME: tmuxName }),
       },
     });
@@ -2660,6 +2701,7 @@ export function createSessionManager(deps: SessionManagerDeps): OpenCodeSessionM
     const now = new Date().toISOString();
     updateMetadata(sessionsDir, sessionId, {
       status: "spawning",
+      accountId: resolvedAccount.accountId,
       runtimeHandle: JSON.stringify(handle),
       restoredAt: now,
     });
